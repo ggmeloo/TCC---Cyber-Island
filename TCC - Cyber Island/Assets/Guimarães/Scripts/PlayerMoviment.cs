@@ -77,7 +77,7 @@ public class PlayerMovement : MonoBehaviour
     void Update()
     {
         HandleInput(); // Lê todos os inputs, incluindo ataque
-        HandleInteractionCheck();
+      //  HandleInteractionCheck();
         CalculateMoveDirection();
         UpdateAnimatorParameters(); // Atualiza Speed, IsGrounded, IsCrouching
     }
@@ -296,8 +296,8 @@ public class PlayerMovement : MonoBehaviour
         if (Physics.Raycast(mainCameraTransform.position, mainCameraTransform.forward, out hit, interactionDistance, interactableMask))
         {
             InteractableItem item = hit.collider.GetComponent<InteractableItem>();
-            if (item != null) item.Interact();
-            else Debug.LogWarning($"Object {hit.collider.name} is on Interactable layer but has no InteractableItem script.");
+          //  if (item != null) item.Interact();
+           // else Debug.LogWarning($"Object {hit.collider.name} is on Interactable layer but has no InteractableItem script.");
         }
     }
 
