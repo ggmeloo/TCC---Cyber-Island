@@ -472,7 +472,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: c0e8ec4be6a4d554881a5c8bb6d0c0cf, type: 3}
       propertyPath: m_LocalPosition.z
-      value: 10.792627
+      value: 36.51
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: c0e8ec4be6a4d554881a5c8bb6d0c0cf, type: 3}
       propertyPath: m_LocalRotation.w
@@ -781,7 +781,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 1438546959266459337, guid: 60770bdb4dc667c45bea53db0339dc05, type: 3}
       propertyPath: m_LocalPosition.z
-      value: -3.45
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 1438546959266459337, guid: 60770bdb4dc667c45bea53db0339dc05, type: 3}
       propertyPath: m_LocalRotation.w
@@ -851,6 +851,8 @@ GameObject:
   - component: {fileID: 1376124581}
   - component: {fileID: 1376124580}
   - component: {fileID: 1376124579}
+  - component: {fileID: 1376124583}
+  - component: {fileID: 1376124584}
   m_Layer: 0
   m_Name: Personagem
   m_TagString: Untagged
@@ -893,9 +895,6 @@ MonoBehaviour:
   groundMask:
     serializedVersion: 2
     m_Bits: 64
-  interactableMask:
-    serializedVersion: 2
-    m_Bits: 128
   walkSpeed: 3
   sprintSpeed: 7
   crouchSpeed: 2.5
@@ -907,7 +906,13 @@ MonoBehaviour:
   standingHeight: 2
   crouchingHeight: 1
   crouchTransitionSpeed: 10
-  interactionDistance: 3
+  idleStateName: Idle
+  walkStateName: Walking
+  runStateName: Running
+  jumpStartStateName: StandingJump
+  fallingStateName: Fall
+  crouchIdleStateName: CrouchIdle
+  crouchWalkStateName: CrounchWalking
 --- !u!136 &1376124580
 CapsuleCollider:
   m_ObjectHideFlags: 0
@@ -958,6 +963,51 @@ Rigidbody:
   m_Interpolate: 0
   m_Constraints: 112
   m_CollisionDetection: 0
+--- !u!95 &1376124583
+Animator:
+  serializedVersion: 7
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1376124577}
+  m_Enabled: 0
+  m_Avatar: {fileID: 0}
+  m_Controller: {fileID: 0}
+  m_CullingMode: 0
+  m_UpdateMode: 0
+  m_ApplyRootMotion: 0
+  m_LinearVelocityBlending: 0
+  m_StabilizeFeet: 0
+  m_AnimatePhysics: 0
+  m_WarningMessage: 
+  m_HasTransformHierarchy: 1
+  m_AllowConstantClipSamplingOptimization: 1
+  m_KeepAnimatorStateOnDisable: 0
+  m_WriteDefaultValuesOnDisable: 0
+--- !u!114 &1376124584
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1376124577}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: eb2d3af5ce531a9499ab9f26261272ef, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  playerAnimator: {fileID: 999240971}
+  playerMovement: {fileID: 1376124579}
+  maxComboSteps: 3
+  attack1StateName: Attack1
+  attack2StateName: Attack2
+  attack3StateName: Attack3
+  transitionStateName: Transition
+  idleStateForReset: Idle
+  isAttacking: 0
+  currentComboStep: 0
+  nextAttackBuffered: 0
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
