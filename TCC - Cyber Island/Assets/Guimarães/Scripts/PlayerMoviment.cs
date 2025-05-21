@@ -1,240 +1,263 @@
 using UnityEngine;
 
 [RequireComponent(typeof(Rigidbody))]
+[RequireComponent(typeof(Animator))] // Mesmo que o Animator esteja no filho, esta dependência no pai não prejudica.
 [RequireComponent(typeof(CapsuleCollider))]
-[RequireComponent(typeof(Animator))]
-
 public class PlayerMovement : MonoBehaviour
 {
-    [Header("Animation")]
-    [SerializeField] Animator playerAnimator;
-
-    [Header("References")]
-    [SerializeField] Transform mainCameraTransform;
-    [SerializeField] Transform groundCheckOrigin;
-    [SerializeField] LayerMask groundMask = 1;
-
-    [Header("Movement Settings")]
-    [SerializeField] float walkSpeed = 5f;
-    [SerializeField] float sprintSpeed = 8f;
-    [SerializeField] float crouchSpeed = 2.5f;
-    [SerializeField] float speedChangeRate = 10.0f;
-    [SerializeField] float rotationSpeed = 15f;
-
-    [Header("Jump Settings")]
-    [SerializeField] float jumpForce = 8f;
-    [SerializeField] float gravityMultiplier = 2.5f;
-    [SerializeField] float groundCheckDistance = 0.3f;
-
-    [Header("Crouch Settings")]
-    [SerializeField] float standingHeight = 2.0f;
-    [SerializeField] float crouchingHeight = 1.0f;
-    [SerializeField] float crouchTransitionSpeed = 10f;
-
-    [Header("Animation State Names (Locomotion Only)")] // <<< VERIFIQUE ESSES NOMES NO INSPECTOR
-    [SerializeField] string idleStateName = "Idle";
-    [SerializeField] string walkStateName = "Walk";
-    [SerializeField] string runStateName = "Run";
-    [SerializeField] string jumpStartStateName = "JumpStart";
-    [SerializeField] string fallingStateName = "Falling";
-    [SerializeField] string crouchIdleStateName = "CrouchIdle";
-    [SerializeField] string crouchWalkStateName = "CrouchWalk";
-
+    [Header("Referências")]
+    public Transform cameraTransform;
+    public Animator characterAnimator; // Arraste o objeto PlayerModel aqui
     private Rigidbody rb;
     private CapsuleCollider capsuleCollider;
-    private Vector2 moveInput;
-    private float targetSpeed;
-    private float currentSpeed;
-    private float currentCapsuleHeight;
-    private Vector3 worldMoveDirection = Vector3.zero;
-    private bool isGrounded;
-    private bool isSprinting;
-    private bool isCrouching = false;
-    private bool jumpRequested = false; // Flag para a física do pulo
-    private bool animationJumpRequested = false; // Flag separada para a ANIMAÇÃO de pulo
-    private bool crouchHeld = false;
-    private bool canControlLocomotion = true;
-    private string currentLocomotionAnimationState = "";
 
-    public bool IsGrounded => isGrounded;
-    public bool IsCrouching => isCrouching;
-    public bool CanCurrentlyStartAction() => isGrounded && !isCrouching && canControlLocomotion;
-    public bool CanControlLocomotion { get => canControlLocomotion; set => canControlLocomotion = value; }
-    public Transform MainCameraTransformProperty => mainCameraTransform;
+    [Header("Configurações de Movimento")]
+    public float walkSpeed = 3.0f;
+    public float sprintSpeed = 6.0f;
+    public float crouchSpeed = 1.5f;
+    public float rotationSpeed = 720f;
+    public float jumpForce = 7f;
 
-    // Hashes (para performance com Animator.Play)
-    private int idleStateHash;
-    private int walkStateHash;
-    private int runStateHash;
-    private int jumpStartStateHash;
-    private int fallingStateHash;
-    private int crouchIdleStateHash;
-    private int crouchWalkStateHash;
+    [Header("Configurações de Agachar")]
+    public float standingHeight = 1.8f;
+    public float crouchingHeight = 0.9f;
+    private float standingCenterY;
+    private float crouchingCenterY;
+    public LayerMask obstructionLayers;
+
+    [Header("Verificação de Chão")]
+    public Transform groundCheckPoint;
+    public float groundCheckRadius = 0.2f;
+    public LayerMask groundLayer;
+
+    [Header("Estado Atual (Debug)")]
+    [SerializeField] private Vector3 moveInputDirection = Vector3.zero;
+    [SerializeField] private Vector3 finalMoveVelocity = Vector3.zero;
+    [SerializeField] private float currentSpeed;
+    [SerializeField] private bool isCrouching = false;
+    [SerializeField] private bool wantsToCrouch = false;
+    [SerializeField] private bool isSprinting = false;
+    [SerializeField] private bool isGrounded = true;
+    [SerializeField] private bool isJumpingOrFalling = false;
 
 
-    void Awake()
+    void Start()
     {
         rb = GetComponent<Rigidbody>();
         capsuleCollider = GetComponent<CapsuleCollider>();
-        playerAnimator = GetComponent<Animator>();
 
-        if (!playerAnimator) Debug.LogError("FATAL: Animator missing!", this);
-        else { playerAnimator.applyRootMotion = false; }
-        if (!mainCameraTransform) Debug.LogError("FATAL: MainCameraTransform missing!", this);
-        if (rb == null) Debug.LogError("FATAL: Rigidbody missing!", this);
-        if (capsuleCollider == null) Debug.LogError("FATAL: CapsuleCollider missing!", this);
-        if (!groundCheckOrigin) { groundCheckOrigin = transform; Debug.LogWarning("GroundCheckOrigin not set."); }
+        if (characterAnimator == null)
+        {
+            characterAnimator = GetComponentInChildren<Animator>();
+            if (characterAnimator == null)
+            {
+                Debug.LogError("ANIMATOR NÃO ENCONTRADO no PlayerMovement ou em seus filhos! As animações não funcionarão.", this.gameObject);
+            }
+            else
+            {
+                Debug.Log("Animator encontrado via GetComponentInChildren em PlayerMovement.", this.gameObject);
+            }
+        }
+        else
+        {
+            Debug.Log("Animator referenciado via Inspector em PlayerMovement: " + (characterAnimator != null), this.gameObject);
+        }
 
-        currentCapsuleHeight = standingHeight;
-        if (capsuleCollider != null) { capsuleCollider.height = currentCapsuleHeight; capsuleCollider.center = new Vector3(0, standingHeight / 2f, 0); }
 
-        // Calcula Hashes dos nomes dos estados de locomoção
-        idleStateHash = Animator.StringToHash(idleStateName);
-        walkStateHash = Animator.StringToHash(walkStateName);
-        runStateHash = Animator.StringToHash(runStateName);
-        jumpStartStateHash = Animator.StringToHash(jumpStartStateName);
-        fallingStateHash = Animator.StringToHash(fallingStateName);
-        crouchIdleStateHash = Animator.StringToHash(crouchIdleStateName);
-        crouchWalkStateHash = Animator.StringToHash(crouchWalkStateName);
+        if (cameraTransform == null)
+        {
+            cameraTransform = Camera.main.transform;
+        }
 
-        currentLocomotionAnimationState = idleStateName; // Começa assumindo Idle
+        rb.freezeRotation = true;
+        rb.interpolation = RigidbodyInterpolation.Interpolate;
+        rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+
+        if (Mathf.Abs(capsuleCollider.height - standingHeight) > 0.01f)
+        {
+            //Debug.LogWarning($"Altura inicial do CapsuleCollider ({capsuleCollider.height}) não bate com standingHeight ({standingHeight}). Ajustando.");
+        }
+        capsuleCollider.height = standingHeight;
+        standingCenterY = capsuleCollider.center.y;
+        crouchingCenterY = standingCenterY - (standingHeight - crouchingHeight) / 2.0f;
+        capsuleCollider.center = new Vector3(capsuleCollider.center.x, standingCenterY, capsuleCollider.center.z);
+
+        if (groundCheckPoint == null)
+        {
+            Debug.LogError("GroundCheckPoint não atribuído no PlayerMovement!", this.gameObject);
+            GameObject gcp = new GameObject("GroundCheckPoint_Auto");
+            gcp.transform.SetParent(transform);
+            gcp.transform.localPosition = new Vector3(0, (-standingHeight / 2f) + capsuleCollider.radius * 0.5f, 0);
+            groundCheckPoint = gcp.transform;
+        }
+
+
+        Cursor.lockState = CursorLockMode.Locked;
+        Cursor.visible = false;
     }
-
-    void Start() { CanControlLocomotion = true; }
 
     void Update()
     {
-        if (Time.timeScale <= 0f) return;
         HandleInput();
-        CalculateMoveDirection();
-        UpdateLocomotionAnimationState(); // << Chama o método de animação
+        ProcessCrouch();
+        if (characterAnimator != null) UpdateAnimatorParameters();
     }
 
     void FixedUpdate()
     {
-        if (Time.timeScale <= 0f) return;
-        GroundCheck();
-        if (CanControlLocomotion) { HandleMovement(); HandleRotation(); }
-        else { if (rb != null && !rb.isKinematic) rb.linearVelocity = Vector3.Lerp(rb.linearVelocity, new Vector3(0, rb.linearVelocity.y, 0), Time.fixedDeltaTime * 10f); }
-        HandleJump(); // Processa a física do pulo
-        HandleCrouch();
-        ApplyGravity();
+        CheckGrounded();
+        CalculateFinalMoveVelocity();
+        ApplyMovementAndRotation();
+        ApplyJump();
     }
 
     void HandleInput()
     {
-        if (CanControlLocomotion)
-        {
-            moveInput.x = Input.GetAxisRaw("Horizontal");
-            moveInput.y = Input.GetAxisRaw("Vertical");
-            isSprinting = Input.GetKey(KeyCode.LeftShift) && moveInput.magnitude > 0.1f && !isCrouching;
+        float horizontal = Input.GetAxis("Horizontal");
+        float vertical = Input.GetAxis("Vertical");
 
-            // Requisita pulo para física E para animação
-            if (Input.GetButtonDown("Jump") && isGrounded && !isCrouching)
+        Vector3 camForward = cameraTransform.forward;
+        Vector3 camRight = cameraTransform.right;
+        camForward.y = 0;
+        camRight.y = 0;
+        camForward.Normalize();
+        camRight.Normalize();
+
+        moveInputDirection = (camForward * vertical + camRight * horizontal).normalized;
+
+        isSprinting = Input.GetKey(KeyCode.LeftShift) && !isCrouching && moveInputDirection.magnitude > 0.1f;
+
+        wantsToCrouch = Input.GetKey(KeyCode.LeftControl);
+        //Debug.Log("HandleInput - wantsToCrouch: " + wantsToCrouch); // DEBUG CROUCH INTENT
+
+        if (isGrounded && Input.GetKeyDown(KeyCode.Space) && !isCrouching)
+        {
+            if (characterAnimator != null) characterAnimator.SetTrigger("JumpTrigger");
+            isJumpingOrFalling = true;
+        }
+    }
+
+    void CheckGrounded()
+    {
+        bool previouslyGrounded = isGrounded;
+        if (groundCheckPoint == null)
+        {
+            isGrounded = false;
+            return;
+        }
+        isGrounded = Physics.CheckSphere(groundCheckPoint.position, groundCheckRadius, groundLayer, QueryTriggerInteraction.Ignore);
+
+        if (!previouslyGrounded && isGrounded && isJumpingOrFalling)
+        {
+            isJumpingOrFalling = false;
+            if (characterAnimator != null) characterAnimator.SetTrigger("LandTrigger");
+        }
+        if (!isGrounded && !isJumpingOrFalling && rb.linearVelocity.y < -0.1f)
+        {
+            isJumpingOrFalling = true;
+        }
+    }
+
+    void ProcessCrouch()
+    {
+        //Debug.Log($"ProcessCrouch - Início: wantsToCrouch={wantsToCrouch}, isCrouching={isCrouching}"); // DEBUG CROUCH LOGIC
+        if (wantsToCrouch)
+        {
+            if (!isCrouching)
             {
-                jumpRequested = true; // Para HandleJump em FixedUpdate
-                animationJumpRequested = true; // Para UpdateLocomotionAnimationState
-                Debug.Log("Jump Input Registered (animationJumpRequested = true)");
+                isCrouching = true;
+                //Debug.Log("ProcessCrouch - Agachando. isCrouching agora é: " + isCrouching); // DEBUG CROUCH STATE CHANGE
+                capsuleCollider.height = crouchingHeight;
+                capsuleCollider.center = new Vector3(capsuleCollider.center.x, crouchingCenterY, capsuleCollider.center.z);
+                if (groundCheckPoint != null)
+                    groundCheckPoint.localPosition = new Vector3(groundCheckPoint.localPosition.x, (-crouchingHeight / 2f) + capsuleCollider.radius * 0.5f, groundCheckPoint.localPosition.z);
             }
-            crouchHeld = Input.GetKey(KeyCode.LeftControl);
         }
-        else { moveInput = Vector2.zero; isSprinting = false; jumpRequested = false; animationJumpRequested = false; crouchHeld = false; }
-    }
-
-    void CalculateMoveDirection() { /* ...código anterior... */ if (mainCameraTransform == null) return; Vector3 camF = mainCameraTransform.forward; camF.y = 0; camF.Normalize(); Vector3 camR = mainCameraTransform.right; camR.y = 0; camR.Normalize(); worldMoveDirection = (camF * moveInput.y + camR * moveInput.x).normalized; }
-    void GroundCheck() { /* ...código anterior... */ if (groundCheckOrigin == null) { isGrounded = false; return; } bool prevGrounded = isGrounded; isGrounded = Physics.CheckSphere(groundCheckOrigin.position, groundCheckDistance, groundMask, QueryTriggerInteraction.Ignore); if (prevGrounded && !isGrounded) Debug.Log("Left Ground"); else if (!prevGrounded && isGrounded) Debug.Log("Landed on Ground"); }
-    void HandleMovement() { /* ...código anterior... */ if (rb == null || rb.isKinematic) return; if (isCrouching) targetSpeed = crouchSpeed; else if (isSprinting) targetSpeed = sprintSpeed; else targetSpeed = walkSpeed; if (moveInput == Vector2.zero) targetSpeed = 0.0f; currentSpeed = Mathf.Lerp(currentSpeed, targetSpeed, Time.fixedDeltaTime * speedChangeRate); currentSpeed = Mathf.Round(currentSpeed * 100f) / 100f; Vector3 targetVelocity = worldMoveDirection * currentSpeed; targetVelocity.y = rb.linearVelocity.y; rb.linearVelocity = targetVelocity; if (isGrounded && !jumpRequested) rb.AddForce(Vector3.down * 2f, ForceMode.Force); }
-    void HandleRotation() { /* ...código anterior... */ if (rb == null || rb.isKinematic) return; if (worldMoveDirection != Vector3.zero && moveInput.magnitude > 0.1f && CanControlLocomotion) { Quaternion targetRotation = Quaternion.LookRotation(worldMoveDirection, Vector3.up); Quaternion newRotation = Quaternion.Slerp(rb.rotation, targetRotation, Time.fixedDeltaTime * rotationSpeed); rb.MoveRotation(newRotation); } }
-    void ApplyGravity() { /* ...código anterior... */ if (rb == null || rb.isKinematic) return; if (!isGrounded && rb.linearVelocity.y < 0) { rb.AddForce(Physics.gravity * (gravityMultiplier - 1f) * rb.mass); } }
-
-    void HandleJump() // Só física
-    {
-        if (rb == null || rb.isKinematic) return;
-        if (jumpRequested) // jumpRequested é setado em HandleInput se CanControlLocomotion e condições são verdadeiras
+        else
         {
-            Debug.Log("HandleJump: Applying Jump Force.");
-            rb.linearVelocity = new Vector3(rb.linearVelocity.x, 0f, rb.linearVelocity.z);
-            rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
-            jumpRequested = false; // Consome pedido da física
+            if (isCrouching)
+            {
+                if (CanStandUp())
+                {
+                    isCrouching = false;
+                    //Debug.Log("ProcessCrouch - Levantando. isCrouching agora é: " + isCrouching); // DEBUG CROUCH STATE CHANGE
+                    capsuleCollider.height = standingHeight;
+                    capsuleCollider.center = new Vector3(capsuleCollider.center.x, standingCenterY, capsuleCollider.center.z);
+                    if (groundCheckPoint != null)
+                        groundCheckPoint.localPosition = new Vector3(groundCheckPoint.localPosition.x, (-standingHeight / 2f) + capsuleCollider.radius * 0.5f, groundCheckPoint.localPosition.z);
+                }
+                //else Debug.Log("ProcessCrouch - Queria levantar, mas CanStandUp() retornou false."); // DEBUG CAN STAND UP
+            }
         }
     }
-    void HandleCrouch() { /* ...código anterior... */ if (capsuleCollider == null) return; float targetHeight = crouchHeld ? crouchingHeight : standingHeight; if (!CanControlLocomotion && isCrouching) targetHeight = standingHeight; if (Mathf.Abs(currentCapsuleHeight - targetHeight) > 0.01f) { if (targetHeight > currentCapsuleHeight && CheckObstructionAbove(targetHeight)) targetHeight = currentCapsuleHeight; else { currentCapsuleHeight = Mathf.Lerp(currentCapsuleHeight, targetHeight, Time.fixedDeltaTime * crouchTransitionSpeed); } } else { currentCapsuleHeight = targetHeight; } capsuleCollider.height = currentCapsuleHeight; capsuleCollider.center = new Vector3(0, currentCapsuleHeight / 2f, 0); isCrouching = currentCapsuleHeight < (standingHeight - 0.1f); if (Mathf.Approximately(currentCapsuleHeight, targetHeight)) { capsuleCollider.height = targetHeight; capsuleCollider.center = new Vector3(0, targetHeight / 2f, 0); } }
-    bool CheckObstructionAbove(float targetHeight) { /* ...código anterior... */ if (capsuleCollider == null) return false; float radius = capsuleCollider.radius; float checkDistance = targetHeight - currentCapsuleHeight; Vector3 centerOffset = capsuleCollider.center; Vector3 p1 = transform.position + centerOffset + Vector3.up * (currentCapsuleHeight / 2f - radius); Vector3 p2 = transform.position + centerOffset - Vector3.up * (currentCapsuleHeight / 2f - radius); return Physics.CapsuleCast(p1, p2, radius, Vector3.up, checkDistance + 0.05f, ~groundMask, QueryTriggerInteraction.Ignore); }
 
-
-    void UpdateLocomotionAnimationState()
+    bool CanStandUp()
     {
-        if (playerAnimator == null) { Debug.LogError("UpdateLocomotionAnimationState: Animator is NULL."); return; }
+        Vector3 currentCapsuleCenter = transform.TransformPoint(capsuleCollider.center);
+        Vector3 castOrigin = currentCapsuleCenter + transform.up * (crouchingHeight / 2f - capsuleCollider.radius);
+        float castDistance = standingHeight - crouchingHeight;
 
-        // Se este script não deve controlar a animação (ex: PlayerAttack está no controle), não faz nada.
-        if (!CanControlLocomotion)
+        if (Physics.SphereCast(castOrigin, capsuleCollider.radius * 0.9f, transform.up, out RaycastHit hit, castDistance, obstructionLayers, QueryTriggerInteraction.Ignore))
         {
-            // Debug.Log("UpdateLocomotionAnimationState: SKIPPED (CanControlLocomotion is false)");
-            currentLocomotionAnimationState = ""; // Reseta para que na próxima vez que puder, ele toque o estado correto
+            //Debug.Log("CanStandUp: Obstruído por " + hit.collider.name); // DEBUG OBSTRUCTION
+            return false;
+        }
+        return true;
+    }
+
+    void CalculateFinalMoveVelocity()
+    {
+        if (isCrouching) currentSpeed = crouchSpeed;
+        else if (isSprinting) currentSpeed = sprintSpeed;
+        else currentSpeed = walkSpeed;
+
+        Vector3 targetVelocity = moveInputDirection * currentSpeed;
+        finalMoveVelocity = new Vector3(targetVelocity.x, rb.linearVelocity.y, targetVelocity.z);
+    }
+
+    void ApplyMovementAndRotation()
+    {
+        rb.linearVelocity = finalMoveVelocity;
+
+        if (moveInputDirection.magnitude >= 0.1f)
+        {
+            Quaternion targetRotation = Quaternion.LookRotation(moveInputDirection);
+            rb.MoveRotation(Quaternion.RotateTowards(rb.rotation, targetRotation, rotationSpeed * Time.fixedDeltaTime));
+        }
+    }
+
+    void ApplyJump()
+    {
+        if (isJumpingOrFalling && isGrounded && rb.linearVelocity.y < jumpForce * 0.5f)
+        {
+            if (Time.timeSinceLevelLoad < 0.1f || isGrounded)
+            {
+                rb.AddForce(Vector3.up * jumpForce, ForceMode.VelocityChange);
+            }
+        }
+    }
+
+    void UpdateAnimatorParameters()
+    {
+        if (characterAnimator == null)
+        {
+            //Debug.LogError("UpdateAnimatorParameters: characterAnimator é NULO!"); // DEBUG ANIMATOR REF
             return;
         }
 
-        string targetStateName = idleStateName; // Assume Idle por padrão
-
-        if (!isGrounded)
+        float targetSpeedPercent = 0f;
+        if (moveInputDirection.magnitude > 0.1f)
         {
-            // Estamos no ar
-            if (animationJumpRequested) // Se acabamos de pedir um pulo para a animação
-            {
-                targetStateName = jumpStartStateName;
-                Debug.Log($"Animation Target: JumpStart (animationJumpRequested=true)");
-            }
-            else // Se não pedimos pulo AGORA, mas estamos no ar, estamos caindo
-            {
-                // Evita spammar Play(Falling) se já está em Falling ou JumpStart
-                AnimatorStateInfo stateInfo = playerAnimator.GetCurrentAnimatorStateInfo(0);
-                if (!stateInfo.IsName(fallingStateName) && !stateInfo.IsName(jumpStartStateName))
-                {
-                    targetStateName = fallingStateName;
-                    Debug.Log($"Animation Target: Falling (not grounded, no jump request)");
-                }
-                else
-                {
-                    targetStateName = currentLocomotionAnimationState; // Mantém estado aéreo atual
-                }
-            }
-        }
-        else if (isCrouching) // No chão e agachado
-        {
-            targetStateName = (moveInput.magnitude > 0.1f) ? crouchWalkStateName : crouchIdleStateName;
-            // Debug.Log($"Animation Target: {targetStateName} (Crouching, MoveMag: {moveInput.magnitude})");
-        }
-        else if (isSprinting) // No chão, em pé, correndo
-        {
-            targetStateName = runStateName;
-            // Debug.Log($"Animation Target: Run");
-        }
-        else if (moveInput.magnitude > 0.1f) // No chão, em pé, andando
-        {
-            targetStateName = walkStateName;
-            // Debug.Log($"Animation Target: Walk (MoveMag: {moveInput.magnitude})");
-        }
-        else // No chão, em pé, parado
-        {
-            targetStateName = idleStateName;
-            // Debug.Log($"Animation Target: Idle");
+            if (isSprinting) targetSpeedPercent = 1.0f;
+            else targetSpeedPercent = 0.5f;
         }
 
-        // Toca a animação apenas se o estado alvo mudou
-        if (currentLocomotionAnimationState != targetStateName && !string.IsNullOrEmpty(targetStateName))
-        {
-            Debug.Log($"PlayerMovement Playing Locomotion: FROM '{currentLocomotionAnimationState}' TO '{targetStateName}'");
-            playerAnimator.Play(targetStateName, 0, 0f); // Layer 0, começa do início
-            currentLocomotionAnimationState = targetStateName;
-        }
+        // DEBUG VALORES ENVIADOS AO ANIMATOR
+        //Debug.Log($"Animator Update: Speed={targetSpeedPercent}, Crouch={isCrouching}, Grounded={isGrounded}, JumpFall={isJumpingOrFalling}");
 
-        // Consome a flag de animação de pulo DEPOIS de usá-la
-        if (animationJumpRequested)
-        {
-            animationJumpRequested = false;
-        }
+        characterAnimator.SetFloat("SpeedPercent", targetSpeedPercent, 0.1f, Time.deltaTime);
+        characterAnimator.SetBool("IsCrouching", isCrouching);
+        characterAnimator.SetBool("IsGrounded", isGrounded);
+        characterAnimator.SetBool("IsJumpingOrFalling", isJumpingOrFalling);
     }
-
-    // --- Gizmos ---
-    private void OnDrawGizmosSelected() { /* ...código anterior... */ }
 }

@@ -1,155 +1,249 @@
 using UnityEngine;
 using System.Collections;
 
-[RequireComponent(typeof(Animator))]
 public class PlayerAttack : MonoBehaviour
 {
-    [Header("Components")]
-    [SerializeField] Animator playerAnimator;
-    [SerializeField] PlayerMovement playerMovement;
+    [Header("Referências")]
+    public Animator characterAnimator;
+    public Transform meleeAttackPoint;
 
-    [Header("Attack Settings")]
-    [SerializeField] int maxComboSteps = 3;
-    [Tooltip("Nome EXATO do estado de Ataque 1.")][SerializeField] string attack1StateName = "Attack1";
-    [Tooltip("Nome EXATO do estado de Ataque 2.")][SerializeField] string attack2StateName = "Attack2";
-    [Tooltip("Nome EXATO do estado de Ataque 3.")][SerializeField] string attack3StateName = "Attack3";
-    [Tooltip("Nome EXATO do estado de Transição Pós-Ataque.")][SerializeField] string transitionStateName = "Transition";
-    [Tooltip("Nome EXATO do estado Idle (para forçar volta após transição).")][SerializeField] string idleStateForReset = "Idle"; // O mesmo que idleStateName em PlayerMovement
+    [Header("Configurações Gerais de Ataque")]
+    public int maxComboSteps = 3;
+    private int currentComboStep = 0;
+    private float lastSuccessfulAttackInputTime = 0f;
+    public float comboResetTime = 2.0f;
+    private bool attackBuffered = false;
+    private bool isAnimatorInAttackState = false; // Ainda útil para a lógica de buffer
 
-    [Header("State (Read Only)")]
-    [SerializeField] private bool isAttacking = false;
-    [SerializeField] private int currentComboStep = 0;
-    [SerializeField] private bool nextAttackBuffered = false;
-    [SerializeField] private Coroutine attackCoroutine = null;
+    public enum WeaponAnimType { Unarmed = 0, Melee = 1, Ranged = 2 }
+    public WeaponAnimType equippedWeaponAnimType = WeaponAnimType.Unarmed;
+    private const string ATTACK_STATE_TAG = "Attack";
 
-    private int attack1Hash, attack2Hash, attack3Hash, transitionHash, idleResetHash;
+    [Header("Configurações de Dano do Player")]
+    public int baseDamage = 20;
+    public float criticalHitChance = 0.2f;
+    public int criticalDamageMultiplier = 2;
+    public float meleeAttackRadius = 0.5f;
+    public LayerMask enemyLayer;
 
-    public bool IsAttacking => isAttacking;
+    // --- NOVO PARA DETECÇÃO DE DANO SEM ANIMATION EVENTS ---
+    [Tooltip("Percentual da duração da animação de ataque em que o dano deve ser aplicado (0.0 a 1.0). Ex: 0.5 para meio da animação.")]
+    public float damageApplicationPointNormalized = 0.5f; // Ex: aplica dano na metade da animação
+    private Coroutine activeHitDetectionCoroutine;
+    // ---------------------------------------------------------
 
-    void Awake()
+    void Start()
     {
-        // ... (Awake do PlayerAttack como antes, pegando componentes e hashes) ...
-        if (playerAnimator == null) playerAnimator = GetComponent<Animator>();
-        if (playerMovement == null) playerMovement = GetComponent<PlayerMovement>();
-        if (!playerAnimator) Debug.LogError("PlayerAttack: Animator missing!", this);
-        if (!playerMovement) Debug.LogError("PlayerAttack: PlayerMovement missing!", this);
-
-        attack1Hash = Animator.StringToHash(attack1StateName);
-        attack2Hash = Animator.StringToHash(attack2StateName);
-        attack3Hash = Animator.StringToHash(attack3StateName);
-        transitionHash = Animator.StringToHash(transitionStateName);
-        idleResetHash = Animator.StringToHash(idleStateForReset);
-
-        if (attack1StateName == "" || attack2StateName == "" || attack3StateName == "" || transitionStateName == "" || idleStateForReset == "")
-            Debug.LogError("Nomes dos estados de Ataque/Transição/Idle não definidos no Inspector!", this);
+        if (characterAnimator == null)
+        {
+            characterAnimator = GetComponentInChildren<Animator>();
+            if (characterAnimator == null) { Debug.LogError("PLAYER ATTACK: ANIMATOR NÃO ENCONTRADO! Desabilitando.", this.gameObject); this.enabled = false; return; }
+        }
+        if (meleeAttackPoint == null)
+        {
+            meleeAttackPoint = transform;
+        }
     }
-
-    void Start() { ResetAttackStateInternal(); } // Garante reset
 
     void Update()
     {
-        if (Time.timeScale <= 0f || playerAnimator == null || playerMovement == null) return;
+        if (characterAnimator == null) return;
+
+        // Atualiza se estamos em um estado de ataque do Animator
+        bool previousAttackState = isAnimatorInAttackState;
+        isAnimatorInAttackState = characterAnimator.GetCurrentAnimatorStateInfo(0).IsTag(ATTACK_STATE_TAG);
+
+        // Se acabamos de SAIR de um estado de ataque, paramos qualquer coroutine de hit pendente
+        if (previousAttackState && !isAnimatorInAttackState)
+        {
+            if (activeHitDetectionCoroutine != null)
+            {
+                StopCoroutine(activeHitDetectionCoroutine);
+                activeHitDetectionCoroutine = null;
+                //Debug.Log("Saindo do estado de ataque, parando coroutine de hit detection.");
+            }
+        }
+
+
+        if (currentComboStep > 0 && !isAnimatorInAttackState && Time.time > lastSuccessfulAttackInputTime + comboResetTime)
+        {
+            ResetCombo();
+        }
 
         if (Input.GetMouseButtonDown(0))
         {
-            if (isAttacking) { if (currentComboStep < maxComboSteps) { nextAttackBuffered = true; } }
-            // --- USA CanCurrentlyStartAction do PlayerMovement ---
-            else if (playerMovement.CanCurrentlyStartAction()) // <<< MUDANÇA AQUI
+            attackBuffered = true;
+        }
+
+        if (attackBuffered)
+        {
+            bool attackProcessedThisFrame = false; // Para garantir que o buffer só seja consumido uma vez por lógica de ataque
+
+            if (equippedWeaponAnimType == WeaponAnimType.Unarmed || equippedWeaponAnimType == WeaponAnimType.Melee)
             {
-                StartAttackCombo();
+                if (!isAnimatorInAttackState || currentComboStep == 0)
+                {
+                    currentComboStep = 1;
+                    ProcessAttackParametersForAnimator(true); // true para iniciar detecção de hit
+                    attackProcessedThisFrame = true;
+                }
+                else if (isAnimatorInAttackState && currentComboStep > 0 && currentComboStep < maxComboSteps)
+                {
+                    currentComboStep++;
+                    ProcessAttackParametersForAnimator(true);
+                    attackProcessedThisFrame = true;
+                }
+                else if (isAnimatorInAttackState && currentComboStep == maxComboSteps)
+                {
+                    currentComboStep = 1;
+                    ProcessAttackParametersForAnimator(true);
+                    attackProcessedThisFrame = true;
+                }
+            }
+            else if (equippedWeaponAnimType == WeaponAnimType.Ranged)
+            {
+                if (!isAnimatorInAttackState)
+                {
+                    currentComboStep = 1;
+                    ProcessAttackParametersForAnimator(false); // Ranged pode ter sua própria lógica de hit
+                    // PerformRangedHitLogic(); // Função específica para tiro
+                    attackProcessedThisFrame = true;
+                }
+            }
+
+            if (attackProcessedThisFrame)
+            {
+                lastSuccessfulAttackInputTime = Time.time;
+                attackBuffered = false; // Consome o buffer apenas se um ataque foi processado
             }
         }
+
+        if (Input.GetKeyDown(KeyCode.Alpha1)) { EquipWeapon(WeaponAnimType.Unarmed); }
+        if (Input.GetKeyDown(KeyCode.Alpha2)) { EquipWeapon(WeaponAnimType.Melee); }
+        if (Input.GetKeyDown(KeyCode.Alpha3)) { EquipWeapon(WeaponAnimType.Ranged); }
     }
 
-    void StartAttackCombo()
+    void ProcessAttackParametersForAnimator(bool shouldAttemptHitDetection)
     {
-        if (attackCoroutine != null) { StopCoroutine(attackCoroutine); }
-        attackCoroutine = StartCoroutine(AttackSequence());
-    }
+        if (characterAnimator == null) return;
+        characterAnimator.SetInteger("WeaponType", (int)equippedWeaponAnimType);
+        characterAnimator.SetInteger("ComboStep", currentComboStep);
+        characterAnimator.SetTrigger("AttackInput"); // Dispara o Animator
 
-    IEnumerator AttackSequence()
-    {
-        isAttacking = true;
-        // --- USA A PROPRIEDADE CORRETA ---
-        playerMovement.CanControlLocomotion = false; // <<< MUDANÇA AQUI
-        // ---------------------------------
-        currentComboStep = 1;
-        nextAttackBuffered = false;
-        RotateTowardsCamera();
-
-        while (currentComboStep <= maxComboSteps)
+        // Se este ataque deve tentar uma detecção de hit baseada em tempo
+        if (shouldAttemptHitDetection && (equippedWeaponAnimType == WeaponAnimType.Unarmed || equippedWeaponAnimType == WeaponAnimType.Melee))
         {
-            int currentHash = GetAttackHash(currentComboStep);
-            string currentStateName = GetAttackStateName(currentComboStep);
-            if (currentHash == 0) { Debug.LogError("AttackSequence: Invalid Hash, breaking."); break; }
-
-            playerAnimator.Play(currentHash, 0, 0f);
-            yield return null;
-
-            yield return StartCoroutine(WaitForAnimationFinish(currentHash, currentStateName));
-
-            if (nextAttackBuffered && currentComboStep < maxComboSteps)
-            { currentComboStep++; nextAttackBuffered = false; }
-            else { break; }
-        }
-        yield return StartCoroutine(PlayTransitionAndReset());
-    }
-
-    IEnumerator WaitForAnimationFinish(int stateHash, string stateNameForDebug)
-    {
-        yield return null;
-        float timer = 0f;
-        AnimatorClipInfo[] clipInfo = playerAnimator.GetCurrentAnimatorClipInfo(0);
-        float animationLength = 0.5f;
-        if (clipInfo.Length > 0 && clipInfo[0].clip != null) animationLength = clipInfo[0].clip.length;
-        else Debug.LogWarning($"Could not get clip length for {stateNameForDebug}, using fallback {animationLength}s");
-
-        while (playerAnimator.GetCurrentAnimatorStateInfo(0).shortNameHash == stateHash && playerAnimator.GetCurrentAnimatorStateInfo(0).normalizedTime < 1.0f)
-        {
-            timer += Time.deltaTime;
-            if (timer > animationLength * 1.5f) { Debug.LogWarning($"WaitForAnimationFinish: Safety break for {stateNameForDebug}"); yield break; }
-            yield return null;
+            // Para qualquer coroutine de hit anterior que possa estar rodando
+            if (activeHitDetectionCoroutine != null)
+            {
+                StopCoroutine(activeHitDetectionCoroutine);
+            }
+            // Inicia uma nova coroutine para este ataque
+            activeHitDetectionCoroutine = StartCoroutine(HitDetectionCoroutine());
         }
     }
 
-    IEnumerator PlayTransitionAndReset()
+    IEnumerator HitDetectionCoroutine()
     {
-        if (playerAnimator != null && transitionHash != 0 && transitionStateName != "")
+        // Espera um pequeno delay para o Animator realmente transitar para o novo estado de ataque
+        yield return null; // Espera o próximo frame
+        yield return null; // Espera mais um para garantir a transição
+
+        if (!characterAnimator.GetCurrentAnimatorStateInfo(0).IsTag(ATTACK_STATE_TAG))
         {
-            playerAnimator.Play(transitionHash, 0, 0f);
-            yield return null;
-            yield return StartCoroutine(WaitForAnimationFinish(transitionHash, transitionStateName));
+            //Debug.LogWarning("HitDetectionCoroutine: Animator não está mais em estado de ataque. Abortando hit.");
+            activeHitDetectionCoroutine = null;
+            yield break; // Sai se não estamos mais em um estado de ataque
         }
-        else { Debug.LogWarning("Transition state invalid or Animator missing, skipping transition."); }
-        ResetAttackStateInternal();
+
+        AnimatorStateInfo stateInfo = characterAnimator.GetCurrentAnimatorStateInfo(0);
+        // Animator.GetCurrentAnimatorClipInfo NÃO funciona bem para pegar o clipe de um estado específico
+        // se o estado é parte de uma sub-state machine ou se há blends.
+        // A forma mais robusta seria ter uma referência direta aos AnimationClips se possível,
+        // ou usar nomes de estado para buscar a duração.
+
+        // SOLUÇÃO MAIS SIMPLES (mas menos flexível): Hardcodear durações ou ter um array de durações
+        // Por simplicidade, vamos assumir que podemos pegar a duração do estado atual (pode não ser 100% preciso para todos os setups)
+        float animationLength = stateInfo.length; // Duração do estado atual (inclui blends de transição)
+        float waitTime = animationLength * damageApplicationPointNormalized;
+
+        //Debug.Log($"HitDetectionCoroutine: Estado '{stateInfo.shortNameHash}', Duração: {animationLength:F2}s, Esperando: {waitTime:F2}s para hit.");
+
+        if (waitTime > 0.01f) // Só espera se o tempo for significativo
+        {
+            yield return new WaitForSeconds(waitTime);
+        }
+        else
+        {
+            //Debug.LogWarning("HitDetectionCoroutine: Tempo de espera calculado é muito baixo ou zero. Chamando PerformHitDetection imediatamente.");
+        }
+
+
+        // Verifica novamente se ainda estamos no mesmo tipo de ataque (ou em um estado de ataque)
+        // antes de aplicar o dano, para o caso de o jogador ter trocado de arma ou sido interrompido.
+        if (characterAnimator.GetCurrentAnimatorStateInfo(0).IsTag(ATTACK_STATE_TAG) &&
+            (equippedWeaponAnimType == WeaponAnimType.Unarmed || equippedWeaponAnimType == WeaponAnimType.Melee))
+        {
+            PerformHitDetection();
+        }
+        else
+        {
+            //Debug.Log("HitDetectionCoroutine: Estado mudou antes do hit ou tipo de arma mudou. Dano não aplicado por esta coroutine.");
+        }
+        activeHitDetectionCoroutine = null; // Marca que a coroutine terminou
     }
 
-    int GetAttackHash(int step) { /* ... */ return (step == 1) ? attack1Hash : (step == 2) ? attack2Hash : (step == 3) ? attack3Hash : 0; }
-    string GetAttackStateName(int step) { /* ... */ return (step == 1) ? attack1StateName : (step == 2) ? attack2StateName : (step == 3) ? attack3StateName : "Invalid"; }
-    void RotateTowardsCamera() { /* ... */ if (playerMovement != null && playerMovement.MainCameraTransformProperty != null) { Vector3 ld = playerMovement.MainCameraTransformProperty.forward; ld.y = 0; if (ld != Vector3.zero) { transform.rotation = Quaternion.LookRotation(ld); } } }
 
-    void ResetAttackStateInternal()
+    // ESTA FUNÇÃO AGORA É CHAMADA PELA COROUTINE
+    public void PerformHitDetection()
     {
-        if (!isAttacking && (playerMovement != null && playerMovement.CanControlLocomotion)) return;
-        isAttacking = false;
+        if (equippedWeaponAnimType == WeaponAnimType.Ranged) return; // Já tratado
+
+        //Debug.Log("PerformHitDetection (Coroutine) chamada para Melee/Unarmed.");
+        if (meleeAttackPoint == null) return;
+
+        Collider[] hitColliders = Physics.OverlapSphere(meleeAttackPoint.position, meleeAttackRadius, enemyLayer);
+        foreach (Collider hitEnemyCollider in hitColliders)
+        {
+            ApplyDamageToEnemy(hitEnemyCollider.gameObject);
+        }
+    }
+
+    void ApplyDamageToEnemy(GameObject hitEnemyObject)
+    {
+        if (hitEnemyObject == null) return;
+        EnemyHealth enemyAI = hitEnemyObject.GetComponent<EnemyHealth>();
+        if (enemyAI != null)
+        {
+            bool isCritical = Random.value < criticalHitChance;
+            int damageToDeal = baseDamage;
+            if (isCritical) damageToDeal *= criticalDamageMultiplier;
+            //Debug.Log($"PLAYER: Dano de {damageToDeal} (Crítico: {isCritical}) em {hitEnemyObject.name}.");
+            enemyAI.TakeDamage(damageToDeal, isCritical);
+        }
+    }
+
+    public void EquipWeapon(WeaponAnimType type)
+    {
+        equippedWeaponAnimType = type;
+        ResetCombo();
+    }
+
+    public void ResetCombo()
+    {
         currentComboStep = 0;
-        nextAttackBuffered = false;
-        // --- USA A PROPRIEDADE CORRETA ---
-        if (playerMovement != null) playerMovement.CanControlLocomotion = true; // <<< MUDANÇA AQUI
-        // ---------------------------------
-        attackCoroutine = null;
-        Debug.Log("[AttackLogic] Reset. Locomotion control enabled.");
-
-        // Força o Animator a voltar para Idle explicitamente.
-        // PlayerMovement.UpdateLocomotionAnimationState deve pegar daqui.
-        if (playerAnimator != null && idleResetHash != 0)
+        attackBuffered = false;
+        if (characterAnimator != null)
         {
-            AnimatorStateInfo currentStateInfo = playerAnimator.GetCurrentAnimatorStateInfo(0);
-            if (currentStateInfo.shortNameHash != idleResetHash) // Só toca se não já estiver no Idle
-            {
-                // Debug.Log($"[AttackLogic] Forcing Animator back to '{idleStateForReset}' state.");
-                // playerAnimator.Play(idleResetHash, 0, 0f); // PlayerMovement deve cuidar disso agora
-            }
+            characterAnimator.SetInteger("ComboStep", 0);
         }
+        // Para qualquer coroutine de hit que possa estar rodando quando o combo é resetado
+        if (activeHitDetectionCoroutine != null)
+        {
+            StopCoroutine(activeHitDetectionCoroutine);
+            activeHitDetectionCoroutine = null;
+            //Debug.Log("ResetCombo: Coroutine de hit detection parada.");
+        }
+        //Debug.Log($"Combo resetado. CurrentStep: {currentComboStep}");
     }
 }
