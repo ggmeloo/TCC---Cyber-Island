@@ -11,7 +11,7 @@ GameObject:
   - component: {fileID: 6363453285987659923}
   - component: {fileID: 8061545146100563766}
   - component: {fileID: 5189461584170830844}
-  - component: {fileID: 6900990659313489781}
+  - component: {fileID: 3443062629226359053}
   m_Layer: 0
   m_Name: tower-pirate-stone
   m_TagString: Untagged
@@ -26,12 +26,13 @@ Transform:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 5982002553698019881}
+  serializedVersion: 2
   m_LocalRotation: {x: 0, y: -0, z: -0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
-  m_RootOrder: 0
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!33 &8061545146100563766
 MeshFilter:
@@ -52,10 +53,15 @@ MeshRenderer:
   m_CastShadows: 1
   m_ReceiveShadows: 1
   m_DynamicOccludee: 1
+  m_StaticShadowCaster: 0
   m_MotionVectors: 1
   m_LightProbeUsage: 1
   m_ReflectionProbeUsage: 1
   m_RayTracingMode: 2
+  m_RayTraceProcedural: 0
+  m_RayTracingAccelStructBuildFlagsOverride: 0
+  m_RayTracingAccelStructBuildFlags: 1
+  m_SmallMeshCulling: 1
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
@@ -84,17 +90,25 @@ MeshRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
---- !u!64 &6900990659313489781
-MeshCollider:
+  m_AdditionalVertexStreams: {fileID: 0}
+--- !u!65 &3443062629226359053
+BoxCollider:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 5982002553698019881}
-  m_Material: {fileID: 0}
+  m_Material: {fileID: 13400000, guid: 85245ed27f10a4f4b8fbc18857a0f096, type: 2}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
   m_IsTrigger: 0
+  m_ProvidesContacts: 0
   m_Enabled: 1
-  serializedVersion: 4
-  m_Convex: 1
-  m_CookingOptions: 30
-  m_Mesh: {fileID: -1303228595352174331, guid: 4db85d0bfb520b640a1bc9d34c0cf600, type: 3}
+  serializedVersion: 3
+  m_Size: {x: 5.3308086, y: 6.5020375, z: 7.833921}
+  m_Center: {x: 0.0061957836, y: 3.2510188, z: -1.2451866}

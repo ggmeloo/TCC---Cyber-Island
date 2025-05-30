@@ -5,6 +5,7 @@ TagManager:
   serializedVersion: 3
   tags:
   - NavigationStatic
+  - Collectible
   layers:
   - Default
   - TransparentFX
@@ -16,8 +17,8 @@ TagManager:
   - Interactable
   - Enemy
   - Player
-  - 
-  - 
+  - NPC
+  - Terrain
   - 
   - 
   - 
