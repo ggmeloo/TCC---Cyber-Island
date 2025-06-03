@@ -1,67 +1,47 @@
-// EnemyHealth.cs
 using UnityEngine;
-using System.Collections; // Necessário para IEnumerator
+using System.Collections;
 
 public class EnemyHealth : MonoBehaviour
 {
     [Header("Referências")]
-    [Tooltip("Animator do modelo do inimigo.")]
     public Animator characterAnimator;
-    [Tooltip("Script de movimento do inimigo para pará-lo ao tomar hit ou morrer.")]
-    public EnemyMovement enemyMovement; // Referência ao script de movimento
+    public EnemyMovement enemyMovement;
 
     [Header("Configurações de Vida e Dano")]
     public int maxHealth = 100;
-    [SerializeField] private int currentHealth; // Use [SerializeField] para ver no Inspector, mas manter privado
-    public GameObject damageTextPrefab; // Prefab para o texto de dano flutuante
-    public Transform damageTextSpawnPoint; // Ponto onde o texto de dano aparece
-    public float hitStunDuration = 0.5f; // Duração que o inimigo fica "atordoado" ao levar hit
+    [SerializeField] private int currentHealth;
+    public GameObject damageTextPrefab;
+    public Transform damageTextSpawnPoint;
+    public float hitStunDuration = 0.5f;
 
     private Coroutine hitStunCoroutine;
     private bool isDead = false;
 
-    void Awake()
+    void Awake() // Awake é bom para inicializar referências e estado antes do Start de outros scripts
     {
         currentHealth = maxHealth;
 
-        if (characterAnimator == null)
-        {
-            characterAnimator = GetComponentInChildren<Animator>();
-            if (characterAnimator == null) Debug.LogWarning($"[{gameObject.name}] EnemyHealth: Animator não encontrado.", this);
-        }
-        if (enemyMovement == null)
-        {
-            enemyMovement = GetComponent<EnemyMovement>();
-            if (enemyMovement == null) Debug.LogError($"[{gameObject.name}] EnemyHealth: Script EnemyMovement não encontrado! Funcionalidades de hit/morte podem falhar.", this);
-        }
-        if (damageTextPrefab == null)
-            Debug.LogWarning($"[{gameObject.name}] EnemyHealth: DamageTextPrefab não atribuído.", this);
-        if (damageTextSpawnPoint == null)
-        {
-            damageTextSpawnPoint = transform; // Fallback
-        }
+        if (characterAnimator == null) characterAnimator = GetComponentInChildren<Animator>();
+        if (characterAnimator == null) Debug.LogWarning($"[{gameObject.name}] EnemyHealth: Animator não encontrado.", this);
+
+        if (enemyMovement == null) enemyMovement = GetComponent<EnemyMovement>();
+        if (enemyMovement == null) Debug.LogError($"[{gameObject.name}] EnemyHealth: EnemyMovement não encontrado!", this);
+
+        if (damageTextPrefab == null) Debug.LogWarning($"[{gameObject.name}] EnemyHealth: DamageTextPrefab não atribuído.", this);
+        if (damageTextSpawnPoint == null) damageTextSpawnPoint = transform;
     }
 
-    public bool IsDead()
-    {
-        return isDead;
-    }
+    public bool IsDead() => isDead;
 
-    public void TakeDamage(int damageAmount, bool isCritical)
+    // Modificado para aceitar o parâmetro isCritical, embora o inimigo não o use aqui, mantém consistência com o PlayerAttack.
+    public void TakeDamage(int damageAmount, bool isCritical) // Adicionado isCritical para consistência
     {
-        if (isDead)
-        {
-            // Debug.Log($"[{gameObject.name}] EnemyHealth: Já está morto, ignorando dano.");
-            return;
-        }
+        if (isDead) return;
 
         currentHealth -= damageAmount;
-        Debug.Log($"[{gameObject.name}] EnemyHealth: Tomou {damageAmount} de dano. Crítico: {isCritical}. Vida restante: {currentHealth}");
+        //Debug.Log($"[{gameObject.name}] Tomou {damageAmount} de dano (Crítico: {isCritical}). Vida restante: {currentHealth}");
 
-        if (damageTextPrefab != null)
-        {
-            ShowDamageText(damageAmount, isCritical);
-        }
+        if (damageTextPrefab != null) ShowDamageText(damageAmount, isCritical);
 
         if (currentHealth <= 0)
         {
@@ -70,7 +50,6 @@ public class EnemyHealth : MonoBehaviour
         }
         else
         {
-            // Entra no estado de HIT se não morreu
             if (hitStunCoroutine != null) StopCoroutine(hitStunCoroutine);
             hitStunCoroutine = StartCoroutine(HitStunSequence());
         }
@@ -78,65 +57,84 @@ public class EnemyHealth : MonoBehaviour
 
     IEnumerator HitStunSequence()
     {
-        Debug.Log($"[{gameObject.name}] EnemyHealth: Iniciando HitStunSequence.");
-        if (enemyMovement != null) enemyMovement.EnterHitState(); // Avisa o script de movimento
+        if (isDead) yield break; // Não fazer hit stun se já estiver morrendo/morto
 
-        if (characterAnimator != null)
+        //Debug.Log($"[{gameObject.name}] Iniciando HitStun.");
+        if (enemyMovement != null) enemyMovement.EnterHitState();
+
+        if (characterAnimator != null && characterAnimator.runtimeAnimatorController != null) // Verifica se há um controller
         {
-            // Debug.Log($"[{gameObject.name}] EnemyHealth: Disparando Trigger 'Hit' no Animator.");
-            characterAnimator.SetTrigger("Hit");
+            // Verifica se o parâmetro "Hit" existe antes de tentar dispará-lo
+            bool hasHitTrigger = false;
+            foreach (AnimatorControllerParameter param in characterAnimator.parameters)
+            {
+                if (param.name == "Hit" && param.type == AnimatorControllerParameterType.Trigger)
+                {
+                    hasHitTrigger = true;
+                    break;
+                }
+            }
+            if (hasHitTrigger)
+            {
+                characterAnimator.SetTrigger("Hit");
+            }
+            else Debug.LogWarning($"[{gameObject.name}] EnemyHealth: Animator não possui o Trigger 'Hit'.");
         }
 
         yield return new WaitForSeconds(hitStunDuration);
-        Debug.Log($"[{gameObject.name}] EnemyHealth: Stun de {hitStunDuration}s terminado.");
 
         if (!isDead) // Só sai do hit stun se ainda estiver vivo
         {
-            if (enemyMovement != null) enemyMovement.ExitHitState(); // Avisa o script de movimento para retomar
+            if (enemyMovement != null) enemyMovement.ExitHitState();
         }
         hitStunCoroutine = null;
     }
 
     void ShowDamageText(int damageAmount, bool isCritical)
     {
-        if (damageTextPrefab == null || damageTextSpawnPoint == null) return;
+        if (damageTextPrefab == null || damageTextSpawnPoint == null || Camera.main == null) return;
 
-        Vector3 spawnPosition = damageTextSpawnPoint.position + Vector3.up * 1.5f;
+        Vector3 spawnPosition = damageTextSpawnPoint.position + Random.insideUnitSphere * 0.5f; // Pequeno offset aleatório
         GameObject damageTextInstance = Instantiate(damageTextPrefab, spawnPosition, Quaternion.LookRotation(Camera.main.transform.forward));
-        // Debug.Log($"[{gameObject.name}] EnemyHealth: Instanciado prefab de dano.");
 
         DamageText dt = damageTextInstance.GetComponent<DamageText>();
-        if (dt != null)
-        {
-            dt.SetText(damageAmount.ToString(), isCritical);
-            // Debug.Log($"[{gameObject.name}] EnemyHealth: Texto '{damageAmount}' (Crítico: {isCritical}) definido.");
-        }
-        else Debug.LogWarning($"[{gameObject.name}] EnemyHealth: Script DamageText não encontrado na instância do prefab.");
+        if (dt != null) dt.SetText(damageAmount.ToString(), isCritical);
+        else Debug.LogWarning($"[{gameObject.name}] Script DamageText não encontrado no prefab de texto de dano.");
     }
 
     void Die()
     {
         if (isDead) return;
         isDead = true;
-        Debug.Log($"[{gameObject.name}] EnemyHealth: Morrendo.");
+        //Debug.Log($"[{gameObject.name}] Morreu.");
 
         if (hitStunCoroutine != null) StopCoroutine(hitStunCoroutine);
+        if (enemyMovement != null) enemyMovement.EnterDeadState();
 
-        if (enemyMovement != null) enemyMovement.EnterDeadState(); // Avisa o script de movimento
-
-        if (characterAnimator != null)
+        if (characterAnimator != null && characterAnimator.runtimeAnimatorController != null)
         {
-            // Debug.Log($"[{gameObject.name}] EnemyHealth: Definindo Bool 'IsDead' para true e Speed para 0 no Animator.");
-            characterAnimator.SetBool("IsDead", true);
-            characterAnimator.SetFloat("Speed", 0f); // Garante que para de tentar animar movimento
+            bool hasIsDeadBool = false;
+            foreach (AnimatorControllerParameter param in characterAnimator.parameters)
+            {
+                if (param.name == "IsDead" && param.type == AnimatorControllerParameterType.Bool)
+                {
+                    hasIsDeadBool = true;
+                    break;
+                }
+            }
+            if (hasIsDeadBool) characterAnimator.SetBool("IsDead", true);
+            else Debug.LogWarning($"[{gameObject.name}] EnemyHealth: Animator não possui o Bool 'IsDead'.");
+
+            characterAnimator.SetFloat("Speed", 0f); // Garante que animação de movimento pare
         }
 
         Collider col = GetComponent<Collider>();
-        if (col != null) col.enabled = false;
+        if (col != null) col.enabled = false; // Desabilita colisor para não interagir mais
 
-        // O NavMeshAgent é parado pelo EnemyMovement ao entrar no estado DEAD.
-        // A destruição do objeto pode ser mantida aqui, ou movida para o final de uma animação de morte via evento.
-        Destroy(gameObject, 5f); // Ajuste este tempo para a duração da sua animação de morte
-        Debug.Log($"[{gameObject.name}] EnemyHealth: Objeto será destruído em 5 segundos.");
+        // Considerar desabilitar outros scripts aqui também se necessário
+        if (GetComponent<EnemyAttack>() != null) GetComponent<EnemyAttack>().enabled = false;
+
+
+        Destroy(gameObject, 5f); // Ajuste o tempo para a duração da animação de morte
     }
 }

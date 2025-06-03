@@ -1,27 +1,24 @@
-
 using UnityEngine.AI;
-
 using UnityEngine;
-
-// EnemyMovement.cs
 
 public class EnemyMovement : MonoBehaviour
 {
-    public enum AIMoveState { PATROL, ENGAGED, HIT_STUNNED, DEAD }
+    public enum AIMoveState { PATROL, ENGAGED, HIT_STUNNED, DEAD } // ATTACKING é implícito por EnemyAttack.IsCurrentlyAttacking
     [Header("Referências")]
     public Transform player;
     private NavMeshAgent agent;
     public Animator characterAnimator;
     public EnemyHealth enemyHealth;
+    public EnemyAttack enemyAttackScript;
 
     [Header("Configurações de Movimento")]
     public AIMoveState currentMoveState = AIMoveState.PATROL;
     private AIMoveState previousMoveStateBeforeHit;
     public float aggroRange = 10f;
     public float patrolSpeed = 3f;
-    public float engagedSpeed = 4.5f; // NOVA: Velocidade ao perseguir/engajar ativamente
-    public float attackRange = 2f; // Para saber quando parar de perseguir e talvez atacar
-    public float stoppingDistanceEngaged = 1.5f; // Distância para parar do jogador ao engajar
+    public float engagedSpeed = 4.5f;
+    public float attackRange = 2f;
+    public float stoppingDistanceEngaged = 1.5f;
 
     [Header("Configurações de Patrulha")]
     public float patrolRadius = 10f;
@@ -33,69 +30,83 @@ public class EnemyMovement : MonoBehaviour
     private bool waitingAtPatrolPoint = false;
     private float currentAnimatorSpeedBase;
 
-    [Header("Enemy Attack")]
-    public EnemyAttack enemyAttackScript; // Adicione esta referência
+    [Header("Verificação de Chão (Ground Check)")]
+    public Transform groundCheckPoint;
+    public float groundCheckDistance = 0.3f;
+    public LayerMask groundLayer;
+    public bool adjustToGround = true; // Manteve, mas o ajuste manual de Y ainda é problemático com NavMeshAgent
+    private bool isGrounded = true;
 
-    void Start() // MUDANÇA: Awake para Start para garantir que outras Awakes (como do player) possam ter rodado
+
+    void Start()
     {
         agent = GetComponent<NavMeshAgent>();
         if (agent == null) { Debug.LogError($"[{gameObject.name}] EnemyMovement: NavMeshAgent não encontrado!", this); enabled = false; return; }
 
-        // Com Root Motion no Animator, o NavMeshAgent não deve atualizar a posição ou rotação do transform.
-        // O Animator fará isso. O NavMeshAgent serve para pathfinding e velocidade desejada.
-        // No entanto, para que o NavMeshAgent siga o caminho corretamente mesmo com root motion,
-        // pode ser necessário deixar updatePosition e updateRotation como true e sincronizar
-        // a posição do transform com agent.nextPosition, ou usar OnAnimatorMove.
-        // Por simplicidade inicial, vamos deixar como está e ver o comportamento.
-        // Se o personagem não seguir o caminho direito, precisaremos de OnAnimatorMove.
-        // agent.updatePosition = false; // Considere se o movimento com root motion não seguir o path
-        // agent.updateRotation = false; // Considere se o root motion da animação já faz a rotação
-
-
-
-        if (characterAnimator == null)
-        {
-            characterAnimator = GetComponentInChildren<Animator>();
-            if (characterAnimator == null) Debug.LogWarning($"[{gameObject.name}] EnemyMovement: Animator não encontrado.", this);
-        }
-        if (enemyHealth == null)
-        {
-            enemyHealth = GetComponent<EnemyHealth>();
-            if (enemyHealth == null) Debug.LogError($"[{gameObject.name}] EnemyMovement: Script EnemyHealth não encontrado!", this);
-        }
+        if (characterAnimator == null) characterAnimator = GetComponentInChildren<Animator>();
+        if (enemyHealth == null) enemyHealth = GetComponent<EnemyHealth>();
+        if (enemyAttackScript == null) enemyAttackScript = GetComponent<EnemyAttack>();
+        // ... Verificações de nulidade ...
 
         GameObject playerObject = GameObject.FindGameObjectWithTag("Player");
         if (playerObject != null) player = playerObject.transform;
-        else
-        {
-            Debug.LogError($"[{gameObject.name}] EnemyMovement: Jogador não encontrado! Desabilitando.", this);
-            enabled = false; return;
-        }
+        else { Debug.LogError($"[{gameObject.name}] EnemyMovement: Jogador não encontrado (Tag 'Player')!", this); enabled = false; return; }
+
         startPosition = transform.position;
+
+        if (groundCheckPoint == null)
+        {
+            GameObject gcp = new GameObject(gameObject.name + "_GroundCheckPoint");
+            gcp.transform.SetParent(transform);
+            CapsuleCollider cap = GetComponent<CapsuleCollider>();
+            float yOffset = cap != null ? (-cap.height / 2f) * 0.9f : -0.9f; // Um pouco acima da base
+            gcp.transform.localPosition = new Vector3(0, yOffset, 0);
+            groundCheckPoint = gcp.transform;
+        }
+        if (groundLayer == 0) groundLayer = LayerMask.GetMask("Default");
+
+        // Garante que o stoppingDistance não impeça de chegar no attackRange
+        if (stoppingDistanceEngaged >= attackRange)
+        {
+            stoppingDistanceEngaged = attackRange * 0.8f; // Deixa uma margem
+            Debug.LogWarning($"[{gameObject.name}] Ajustando stoppingDistanceEngaged para {stoppingDistanceEngaged} para ser menor que attackRange ({attackRange})");
+        }
+
         ChangeMoveState(currentMoveState, true);
-
-        if (enemyAttackScript == null) enemyAttackScript = GetComponent<EnemyAttack>();
-        if (enemyAttackScript == null) Debug.LogError($"[{gameObject.name}] EnemyMovement: Script EnemyAttack não encontrado!", this);
-
-
     }
-
 
     void Update()
     {
-        if (player == null ||
-        currentMoveState == AIMoveState.DEAD ||
-        currentMoveState == AIMoveState.HIT_STUNNED ||
-        (enemyAttackScript != null && enemyAttackScript.IsCurrentlyAttacking())) // << NOVA CONDIÇÃO
+        if (player == null || enemyHealth == null || enemyHealth.IsDead())
         {
-            UpdateAnimatorParameters(); // Ainda atualiza o animator para refletir Speed = 0
+            if (currentMoveState != AIMoveState.DEAD) ChangeMoveState(AIMoveState.DEAD);
+            UpdateAnimatorParameters();
             return;
         }
 
-        if (player == null || currentMoveState == AIMoveState.DEAD || currentMoveState == AIMoveState.HIT_STUNNED)
+        if (adjustToGround && currentMoveState != AIMoveState.DEAD) PerformGroundCheck();
+
+
+        bool isAttacking = (enemyAttackScript != null && enemyAttackScript.IsCurrentlyAttacking());
+
+        if (currentMoveState == AIMoveState.HIT_STUNNED || isAttacking)
         {
-            UpdateAnimatorParameters();
+            if (agent.isActiveAndEnabled && agent.isOnNavMesh && !agent.isStopped)
+            {
+                agent.isStopped = true;
+                agent.velocity = Vector3.zero;
+            }
+            UpdateAnimatorParameters(isAttacking); // Passa a flag de ataque
             return;
+        }
+        // Se não está atacando ou stunado, e o agente estava parado, permite mover (a menos que esperando na patrulha)
+        else if (agent.isActiveAndEnabled && agent.isOnNavMesh && agent.isStopped &&
+                 currentMoveState != AIMoveState.DEAD && currentMoveState != AIMoveState.HIT_STUNNED)
+        {
+            if (!(currentMoveState == AIMoveState.PATROL && waitingAtPatrolPoint))
+            {
+                agent.isStopped = false;
+            }
         }
 
         float distanceToPlayer = Vector3.Distance(transform.position, player.position);
@@ -104,80 +115,109 @@ public class EnemyMovement : MonoBehaviour
         {
             case AIMoveState.PATROL:
                 PatrolBehavior();
-                if (distanceToPlayer <= aggroRange) ChangeMoveState(AIMoveState.ENGAGED);
+                if (distanceToPlayer <= aggroRange && CanSeePlayer())
+                {
+                    ChangeMoveState(AIMoveState.ENGAGED);
+                }
                 break;
 
             case AIMoveState.ENGAGED:
-                EngagedBehavior(distanceToPlayer); // Agora EngagedBehavior vai controlar o movimento
-                if (distanceToPlayer > aggroRange * 1.2f) ChangeMoveState(AIMoveState.PATROL);
+                EngagedBehavior(distanceToPlayer);
+                // A decisão de atacar é do EnemyAttack.cs.
+                // Se o jogador sair do range/visão E NÃO estivermos no meio de um ataque, volta a patrulhar.
+                if (!isAttacking) // Só considera voltar a patrulhar se não estiver no meio de um ataque
+                {
+                    if (distanceToPlayer > aggroRange * 1.2f || (distanceToPlayer > attackRange && !CanSeePlayer())) // Se muito longe OU fora do range de ataque e sem visão
+                    {
+                        ChangeMoveState(AIMoveState.PATROL);
+                    }
+                }
                 break;
         }
-        UpdateAnimatorParameters();
+        UpdateAnimatorParameters(isAttacking);
     }
+
+    bool CanSeePlayer()
+    {
+        if (player == null || groundCheckPoint == null) return false; // Adicionado groundCheckPoint null check
+        RaycastHit hit;
+        // Origem do raycast pode ser o groundCheckPoint ou um "ponto de olho" dedicado
+        Vector3 rayOrigin = groundCheckPoint.position + Vector3.up * 0.5f; // Um pouco acima do chão
+        Vector3 directionToPlayer = (player.position + Vector3.up * 0.5f - rayOrigin).normalized;
+        float sightDistance = aggroRange * 1.5f; // Quão longe pode ver
+
+        // Debug.DrawRay(rayOrigin, directionToPlayer * sightDistance, Color.cyan);
+        if (Physics.Raycast(rayOrigin, directionToPlayer, out hit, sightDistance, ~(1 << gameObject.layer))) // Ignora a própria layer
+        {
+            if (hit.transform.CompareTag("Player")) return true;
+        }
+        return false;
+    }
+
+    void PerformGroundCheck() // Removido ajuste manual de Y por enquanto
+    {
+        if (groundCheckPoint == null) return;
+        isGrounded = Physics.Raycast(groundCheckPoint.position, Vector3.down, groundCheckDistance, groundLayer);
+    }
+
 
     void ChangeMoveState(AIMoveState newState, bool forceInitialSetup = false)
     {
-        if (!forceInitialSetup && (currentMoveState == newState || currentMoveState == AIMoveState.DEAD)) return;
+        if (!forceInitialSetup && currentMoveState == newState && currentMoveState != AIMoveState.DEAD) return;
+        if (currentMoveState == AIMoveState.DEAD && newState != AIMoveState.DEAD) return;
 
         if (newState == AIMoveState.HIT_STUNNED && currentMoveState != AIMoveState.DEAD)
         {
             previousMoveStateBeforeHit = currentMoveState;
         }
 
+        //Debug.Log($"[{gameObject.name}] MovState: {currentMoveState} -> {newState}");
         currentMoveState = newState;
         waitingAtPatrolPoint = false;
 
         if (agent != null && agent.isActiveAndEnabled && agent.isOnNavMesh)
         {
-            if (agent.isActiveAndEnabled)
-            { // Checagem redundante, mas segura
-                switch (currentMoveState)
-                {
-                    case AIMoveState.PATROL:
-                        agent.speed = patrolSpeed;
-                        agent.stoppingDistance = 0.1f; // Stopping distance padrão para patrulha
-                        agent.isStopped = false;
-                        currentAnimatorSpeedBase = patrolSpeed;
-                        // Verifica se não estava já patrulhando ou se é setup inicial para evitar chamar GoToNewPatrolPoint desnecessariamente
-                        if (forceInitialSetup || (previousMoveStateBeforeHit != AIMoveState.PATROL && (!forceInitialSetup && newState == AIMoveState.PATROL)))
-                        {
-                            GoToNewPatrolPoint();
-                        }
-                        break;
-                    case AIMoveState.ENGAGED:
-                        agent.speed = engagedSpeed; // <<< USA A NOVA VELOCIDADE DE ENGAGED
-                        agent.stoppingDistance = stoppingDistanceEngaged; // Para parar perto do player
-                        agent.isStopped = false;    // <<< PERMITE MOVIMENTO
-                        currentAnimatorSpeedBase = engagedSpeed; // <<< BASE PARA ANIMAÇÃO DE CORRIDA/MOVIMENTO
-                        break;
-                    case AIMoveState.HIT_STUNNED:
-                        agent.isStopped = true;
-                        agent.velocity = Vector3.zero;
-                        currentAnimatorSpeedBase = 0;
-                        break;
-                    case AIMoveState.DEAD:
-                        agent.isStopped = true;
-                        agent.velocity = Vector3.zero;
-                        currentAnimatorSpeedBase = 0;
-                        if (agent.enabled) agent.enabled = false;
-                        break;
-                }
+            switch (currentMoveState)
+            {
+                case AIMoveState.PATROL:
+                    agent.speed = patrolSpeed;
+                    agent.stoppingDistance = 0.1f;
+                    currentAnimatorSpeedBase = patrolSpeed;
+                    agent.isStopped = false;
+                    GoToNewPatrolPoint(); // Inicia nova patrulha ao entrar no estado
+                    break;
+                case AIMoveState.ENGAGED:
+                    agent.speed = engagedSpeed;
+                    agent.stoppingDistance = stoppingDistanceEngaged;
+                    currentAnimatorSpeedBase = engagedSpeed;
+                    agent.isStopped = false;
+                    break;
+                case AIMoveState.HIT_STUNNED:
+                    agent.isStopped = true;
+                    agent.velocity = Vector3.zero;
+                    currentAnimatorSpeedBase = 0;
+                    break;
+                case AIMoveState.DEAD:
+                    agent.isStopped = true;
+                    agent.velocity = Vector3.zero;
+                    currentAnimatorSpeedBase = 0;
+                    if (agent.enabled) agent.enabled = false;
+                    break;
             }
         }
     }
-
 
     void PatrolBehavior()
     {
         if (agent == null || !agent.isOnNavMesh || !agent.isActiveAndEnabled || agent.isStopped) return;
 
-        // Se o agente não tem um caminho ou chegou ao destino
         if (!agent.pathPending && agent.remainingDistance <= agent.stoppingDistance)
         {
             if (!waitingAtPatrolPoint)
             {
                 waitingAtPatrolPoint = true;
                 patrolTimer = Random.Range(patrolWaitTimeMin, patrolWaitTimeMax);
+                agent.velocity = Vector3.zero;
             }
             else
             {
@@ -185,31 +225,29 @@ public class EnemyMovement : MonoBehaviour
                 if (patrolTimer <= 0) GoToNewPatrolPoint();
             }
         }
-        else waitingAtPatrolPoint = false;
     }
 
     void GoToNewPatrolPoint()
     {
         if (agent == null || !agent.isOnNavMesh || !agent.isActiveAndEnabled) return;
-        agent.isStopped = false;
+        waitingAtPatrolPoint = false; // Reseta aqui
+        agent.isStopped = false; // Garante que pode mover
 
         Vector3 randomPoint;
         if (FindRandomPointOnNavMesh(startPosition, patrolRadius, out randomPoint))
             agent.SetDestination(randomPoint);
         else
             agent.SetDestination(startPosition);
-        waitingAtPatrolPoint = false;
     }
 
     bool FindRandomPointOnNavMesh(Vector3 center, float radius, out Vector3 result)
     {
-        // ... (código sem alteração)
         for (int i = 0; i < 30; i++)
         {
             Vector3 randomDirection = Random.insideUnitSphere * radius;
             randomDirection += center;
             NavMeshHit hit;
-            if (NavMesh.SamplePosition(randomDirection, out hit, radius * 0.5f, NavMesh.AllAreas))
+            if (NavMesh.SamplePosition(randomDirection, out hit, radius, NavMesh.AllAreas))
             {
                 result = hit.position;
                 return true;
@@ -221,56 +259,72 @@ public class EnemyMovement : MonoBehaviour
 
     void EngagedBehavior(float distanceToPlayer)
     {
-        if (player != null && agent != null && agent.isActiveAndEnabled && !agent.isStopped)
+        if (player != null && agent != null && agent.isActiveAndEnabled && agent.isOnNavMesh && !agent.isStopped)
         {
-            agent.SetDestination(player.position); // <<< PERSEGUE O JOGADOR
-
-            // A rotação PODE ser controlada pelo NavMeshAgent se agent.updateRotation = true
-            // Se você desabilitou agent.updateRotation, ou quer uma rotação mais suave/customizada:
-            /*
-            Vector3 directionToPlayer = (player.position - transform.position);
-            directionToPlayer.y = 0;
-            if (directionToPlayer != Vector3.zero)
+            // Só define destino se não estiver muito perto (já na stoppingDistance)
+            // para evitar que o agente "dance" se já estiver no local de ataque.
+            // A verificação de `IsCurrentlyAttacking` no Update principal já para o agente.
+            if (distanceToPlayer > agent.stoppingDistance)
             {
-                Quaternion lookRotation = Quaternion.LookRotation(directionToPlayer);
-                transform.rotation = Quaternion.Slerp(transform.rotation, lookRotation, Time.deltaTime * agent.angularSpeed * 0.1f);
+                agent.SetDestination(player.position);
             }
-            */
+            else // Está perto o suficiente, pode ter parado por stoppingDistance
+            {
+                // Se parou por stoppingDistance mas não está atacando, pode precisar encarar o jogador.
+                if (!(enemyAttackScript != null && enemyAttackScript.IsCurrentlyAttacking()))
+                {
+                    FacePlayer();
+                }
+            }
         }
-        // Se distanceToPlayer <= attackRange, você poderia mudar para um sub-estado de ATAQUE
-        // e definir agent.isStopped = true;
     }
 
-    void UpdateAnimatorParameters()
+    void FacePlayer()
+    {
+        if (player == null) return;
+        Vector3 direction = (player.position - transform.position).normalized;
+        direction.y = 0; // Mantém a rotação apenas no eixo Y
+        if (direction != Vector3.zero)
+        {
+            Quaternion lookRotation = Quaternion.LookRotation(direction);
+            transform.rotation = Quaternion.Slerp(transform.rotation, lookRotation, Time.deltaTime * agent.angularSpeed * 0.1f); // Ajuste a velocidade de rotação
+        }
+    }
+
+
+    void UpdateAnimatorParameters(bool isCurrentlyAttackingFlag = false) // Adicionado parâmetro
     {
         if (characterAnimator == null || agent == null) return;
 
         float actualAgentSpeed = 0f;
-        if (agent.isActiveAndEnabled && agent.isOnNavMesh) // Não checa mais isStopped aqui, pois queremos animar mesmo se parado por stoppingDistance
+        if (agent.isActiveAndEnabled && agent.isOnNavMesh && !agent.isStopped && !isCurrentlyAttackingFlag) // Não pega velocidade se estiver parado ou atacando
         {
             actualAgentSpeed = agent.velocity.magnitude;
         }
 
-        float normalizedSpeed = (currentAnimatorSpeedBase > 0.01f) ? actualAgentSpeed / currentAnimatorSpeedBase : 0f;
-        // Se o agente está "parado" por causa do stoppingDistance mas tem um path, ele ainda pode ter uma pequena velocidade desejada.
-        // Se isStopped é true, a velocidade é 0.
-        if (agent.isStopped)
+        float normalizedSpeed = 0f;
+        // Só calcula normalizedSpeed se não estiver atacando e tiver uma base de velocidade
+        if (!isCurrentlyAttackingFlag && currentAnimatorSpeedBase > 0.01f && !agent.isStopped)
         {
-            normalizedSpeed = 0;
+            normalizedSpeed = actualAgentSpeed / currentAnimatorSpeedBase;
         }
+
         normalizedSpeed = Mathf.Clamp01(normalizedSpeed);
 
         characterAnimator.SetFloat("Speed", normalizedSpeed, 0.1f, Time.deltaTime);
-        characterAnimator.SetBool("IsEngaged", currentMoveState == AIMoveState.ENGAGED);
+        // IsEngaged é true se o estado de movimento for ENGAGED E não estiver atualmente atacando
+        characterAnimator.SetBool("IsEngaged", currentMoveState == AIMoveState.ENGAGED && !isCurrentlyAttackingFlag);
+        characterAnimator.SetBool("IsGrounded", isGrounded);
     }
 
     public void EnterHitState() { ChangeMoveState(AIMoveState.HIT_STUNNED); }
     public void ExitHitState()
     {
+        if (currentMoveState == AIMoveState.DEAD) return;
         if (player != null)
         {
             float distanceToPlayer = Vector3.Distance(transform.position, player.position);
-            if (distanceToPlayer <= aggroRange) ChangeMoveState(AIMoveState.ENGAGED);
+            if (distanceToPlayer <= aggroRange && CanSeePlayer()) ChangeMoveState(AIMoveState.ENGAGED);
             else ChangeMoveState(previousMoveStateBeforeHit == AIMoveState.DEAD ? AIMoveState.PATROL : previousMoveStateBeforeHit);
         }
         else ChangeMoveState(AIMoveState.PATROL);
@@ -280,8 +334,14 @@ public class EnemyMovement : MonoBehaviour
     void OnDrawGizmosSelected()
     {
         Gizmos.color = Color.blue;
-        Gizmos.DrawWireSphere(startPosition == Vector3.zero ? transform.position : startPosition, patrolRadius);
+        Gizmos.DrawWireSphere(Application.isPlaying ? startPosition : transform.position, patrolRadius);
         Gizmos.color = Color.yellow;
         Gizmos.DrawWireSphere(transform.position, aggroRange);
+
+        if (groundCheckPoint != null)
+        {
+            Gizmos.color = isGrounded ? Color.green : Color.red;
+            Gizmos.DrawLine(groundCheckPoint.position, groundCheckPoint.position + Vector3.down * groundCheckDistance);
+        }
     }
 }

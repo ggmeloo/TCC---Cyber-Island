@@ -13,13 +13,18 @@ public class PlayerMovement : MonoBehaviour
     private Rigidbody rb;
     private CapsuleCollider capsuleCollider;
 
+    [Tooltip("Referência ao script de trava de mira do jogador.")]
+    public PlayerTargetLock targetLockScript; // Atribua no Inspector ou deixe o Start tentar pegar
+
     [Header("Configurações de Movimento")]
     public float walkSpeed = 3.0f;
     public float sprintSpeed = 6.0f;
     public float crouchSpeed = 1.5f;
-    public float rotationSpeed = 720f;
+    public float rotationSpeed = 720f; // Velocidade de rotação normal
+    [Tooltip("Multiplicador para a velocidade de rotação ao travar em um alvo. Mais alto = vira mais rápido para o alvo.")]
+    public float lockOnRotationSpeedMultiplier = 2.5f; // Jogador vira mais rápido para o alvo travado
     public float jumpForce = 7f;
-    private bool canMove = true; // Flag para controlar se o movimento está habilitado
+    private bool _canMove = true; // Flag interna para controlar se o movimento está habilitado
 
     [Header("Configurações de Agachar")]
     public float standingHeight = 1.8f;
@@ -34,15 +39,31 @@ public class PlayerMovement : MonoBehaviour
     public LayerMask groundLayer;
 
     [Header("Estado Atual (Debug)")]
-    [SerializeField] private Vector3 moveInputDirection = Vector3.zero; // Input do jogador
-    [SerializeField] private Vector3 finalMoveVelocity = Vector3.zero; // Velocidade a ser aplicada ao Rigidbody
+    [SerializeField] private Vector3 moveInputDirection = Vector3.zero;
+    [SerializeField] private Vector3 finalMoveVelocity = Vector3.zero;
     [SerializeField] private float currentSpeed;
     [SerializeField] private bool isCrouching = false;
     [SerializeField] private bool wantsToCrouch = false;
     [SerializeField] private bool isSprinting = false;
     [SerializeField] private bool isGrounded = true;
     [SerializeField] private bool isJumpingOrFalling = false;
-    private bool jumpRequestedThisFrame = false; // Para registrar a intenção de pulo
+    private bool jumpRequestedThisFrame = false;
+
+    // Propriedade pública para scripts externos controlarem/verificarem se o jogador pode se mover
+    public bool CanMove
+    {
+        get { return _canMove; }
+        set
+        {
+            _canMove = value;
+            if (!_canMove) // Se o movimento for desabilitado externamente
+            {
+                moveInputDirection = Vector3.zero; // Para a intenção de movimento
+                isSprinting = false;
+                // O Rigidbody será parado em FixedUpdate se !CanMove
+            }
+        }
+    }
 
     void Start()
     {
@@ -50,16 +71,16 @@ public class PlayerMovement : MonoBehaviour
         capsuleCollider = GetComponent<CapsuleCollider>();
 
         if (characterAnimator == null) characterAnimator = GetComponentInChildren<Animator>();
-        if (cameraTransform == null) cameraTransform = Camera.main.transform;
+        if (cameraTransform == null && Camera.main != null) cameraTransform = Camera.main.transform;
+        else if (cameraTransform == null) Debug.LogError("PlayerMovement: Câmera principal não encontrada e cameraTransform não atribuída!");
 
         if (rb != null)
         {
-            rb.freezeRotation = true;
+            rb.freezeRotation = true; // Congela rotação por física, controlaremos via script
             rb.interpolation = RigidbodyInterpolation.Interpolate;
             rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
         }
 
-        // Configurações do CapsuleCollider
         capsuleCollider.height = standingHeight;
         standingCenterY = capsuleCollider.center.y;
         crouchingCenterY = standingCenterY - (standingHeight - crouchingHeight) / 2.0f;
@@ -67,11 +88,18 @@ public class PlayerMovement : MonoBehaviour
 
         if (groundCheckPoint == null)
         {
-            // Debug.LogError("GroundCheckPoint não atribuído no PlayerMovement! Criando um.", this.gameObject);
-            GameObject gcp = new GameObject("GroundCheckPoint_Auto");
+            GameObject gcp = new GameObject(gameObject.name + "_GroundCheckPoint_Auto");
             gcp.transform.SetParent(transform);
             gcp.transform.localPosition = new Vector3(0, (-standingHeight / 2f) + capsuleCollider.radius * 0.5f, 0);
             groundCheckPoint = gcp.transform;
+        }
+
+        // Tenta pegar o PlayerTargetLock se não estiver atribuído
+        if (targetLockScript == null)
+        {
+            targetLockScript = GetComponent<PlayerTargetLock>();
+            if (targetLockScript == null)
+                Debug.LogWarning("PlayerMovement: PlayerTargetLock não encontrado neste GameObject. Funcionalidade de rotação em lock-on não funcionará.");
         }
 
         Cursor.lockState = CursorLockMode.Locked;
@@ -80,64 +108,55 @@ public class PlayerMovement : MonoBehaviour
 
     void Update()
     {
-        // A verificação de canMove deve ser a PRIMEIRA COISA no Update
-        if (!canMove)
+        // Processa input apenas se puder se mover
+        if (CanMove)
         {
-            // Se não pode mover, zera a intenção de movimento
+            HandleInput();
+            ProcessCrouch(); // Pode ser chamado mesmo se !CanMove se você quiser a lógica de agachar visualmente
+        }
+        else // Se não pode se mover (ex: durante uma animação, hitstun)
+        {
             moveInputDirection = Vector3.zero;
             isSprinting = false;
-            // wantsToCrouch também pode ser resetado se não quiser permitir agachar durante o diálogo
-            // wantsToCrouch = false;
             jumpRequestedThisFrame = false;
-
-            // Garante que o Animator reflita a parada
-            if (characterAnimator != null)
-            {
-                // Verifica se o parâmetro existe antes de tentar defini-lo
-                if (characterAnimator.parameters.Any(p => p.name == "SpeedPercent"))
-                    characterAnimator.SetFloat("SpeedPercent", 0f, 0.1f, Time.deltaTime);
-                else if (characterAnimator.parameters.Any(p => p.name == "Speed")) // Fallback para nome "Speed"
-                    characterAnimator.SetFloat("Speed", 0f, 0.1f, Time.deltaTime);
-            }
-            return; // Sai do Update para não processar mais nada relacionado a input/movimento
         }
-
-        // Se canMove é true, processa os inputs
-        HandleInput();
-        ProcessCrouch(); // ProcessCrouch pode continuar para permitir agachar/levantar visualmente se desejado
-                         // ou pode ser movido para dentro do if(canMove) de HandleInput.
-                         // Por ora, vamos deixar aqui, mas o movimento físico será impedido em FixedUpdate.
 
         if (characterAnimator != null) UpdateAnimatorParameters();
     }
 
     void FixedUpdate()
     {
-        CheckGrounded(); // Verifica o chão independentemente de canMove, pois afeta o estado do animator
+        CheckGrounded(); // Verifica o chão independentemente de CanMove
 
-        if (!canMove) // Se não pode mover, também não aplica física de movimento
+        if (rb == null) return;
+
+        if (CanMove)
         {
-            // Garante que o Rigidbody pare se não for cinemático
-            if (rb != null && !rb.isKinematic)
-            {
-                // Para o movimento horizontal, mas permite que a gravidade atue se estiver no ar
-                rb.linearVelocity = new Vector3(0, rb.linearVelocity.y, 0);
-                rb.angularVelocity = Vector3.zero;
-            }
-            finalMoveVelocity = new Vector3(0, rb.linearVelocity.y, 0); // Atualiza finalMoveVelocity para refletir parada
-            return;
-        }
+            CalculateFinalMoveVelocity();
+            // Aplica movimento (posição)
+            rb.linearVelocity = new Vector3(finalMoveVelocity.x, rb.linearVelocity.y, finalMoveVelocity.z); // Mantém Y para gravidade/pulo
 
-        // Se canMove é true, processa a física do movimento
-        CalculateFinalMoveVelocity();
-        ApplyMovementAndRotation();
-        ApplyJump();
+            ApplyRotation(); // Aplica rotação
+            ApplyJump();     // Aplica pulo
+        }
+        else // Se não pode se mover
+        {
+            // Para o movimento horizontal do Rigidbody, mas permite que a gravidade atue
+            rb.linearVelocity = new Vector3(0, rb.linearVelocity.y, 0);
+            rb.angularVelocity = Vector3.zero; // Para qualquer rotação residual
+            finalMoveVelocity = new Vector3(0, rb.linearVelocity.y, 0); // Atualiza para refletir parada
+        }
     }
 
-    void HandleInput() // Esta função agora só coleta inputs se canMove for true (devido ao return em Update)
+    void HandleInput() // Chamado de Update, apenas se CanMove for true
     {
         float horizontal = Input.GetAxis("Horizontal");
         float vertical = Input.GetAxis("Vertical");
+
+        // Se estiver travado, o input de movimento pode ser interpretado de forma diferente (strafe)
+        // Por enquanto, vamos manter a lógica de movimento relativa à câmera.
+        // Uma melhoria seria fazer o movimento ser relativo ao jogador quando em lock-on.
+        bool isLocked = (targetLockScript != null && targetLockScript.EstaTravado);
 
         if (cameraTransform != null)
         {
@@ -147,55 +166,40 @@ public class PlayerMovement : MonoBehaviour
             camRight.y = 0;
             camForward.Normalize();
             camRight.Normalize();
-            moveInputDirection = (camForward * vertical + camRight * horizontal).normalized;
+
+            if (isLocked)
+            {
+                // Em lock-on, o forward/right do input se torna relativo ao JOGADOR
+                // para permitir strafe e movimento para trás enquanto encara o alvo.
+                // A rotação do jogador já está sendo cuidada por ApplyRotation para encarar o alvo.
+                moveInputDirection = (transform.forward * vertical + transform.right * horizontal).normalized;
+            }
+            else
+            {
+                moveInputDirection = (camForward * vertical + camRight * horizontal).normalized;
+            }
         }
         else
         {
             moveInputDirection = new Vector3(horizontal, 0, vertical).normalized;
         }
 
-
-        isSprinting = Input.GetKey(KeyCode.LeftShift) && !isCrouching && moveInputDirection.magnitude > 0.1f;
+        isSprinting = Input.GetKey(KeyCode.LeftShift) && !isCrouching && moveInputDirection.magnitude > 0.1f && !isLocked; // Não corre em lock-on? (Opcional)
         wantsToCrouch = Input.GetKey(KeyCode.LeftControl);
 
-        jumpRequestedThisFrame = false; // Reseta a flag de pulo
+        jumpRequestedThisFrame = false;
         if (isGrounded && Input.GetKeyDown(KeyCode.Space) && !isCrouching)
         {
-            jumpRequestedThisFrame = true; // Registra a intenção de pular
-            // O trigger do animator é enviado em ApplyJump para melhor sincronia com a física
+            jumpRequestedThisFrame = true;
         }
     }
 
-    public void SetMovementEnabled(bool enabledStatus)
+    // Método público para outros scripts (como PlayerPickup, PlayerAttack) desabilitarem o movimento
+    public void SetCanMove(bool state)
     {
-        canMove = enabledStatus;
-        // Debug.Log("PlayerMovement: Movimento " + (canMove ? "HABILITADO" : "DESABILITADO"));
-
-        if (!canMove)
-        {
-            // Zera a intenção de movimento imediatamente
-            moveInputDirection = Vector3.zero;
-            isSprinting = false;
-            jumpRequestedThisFrame = false;
-            finalMoveVelocity = new Vector3(0, rb != null ? rb.linearVelocity.y : 0, 0);
-
-            if (rb != null && !rb.isKinematic)
-            {
-                rb.linearVelocity = new Vector3(0, rb.linearVelocity.y, 0);
-                rb.angularVelocity = Vector3.zero;
-            }
-
-            // O DialogueSystem vai tentar controlar o IsTalking do player.
-            // Mas se quiser garantir que a animação de movimento pare:
-            if (characterAnimator != null && HasParameter(characterAnimator, "SpeedPercent")) // Ou "Speed"
-            {
-                characterAnimator.SetFloat("SpeedPercent", 0f);
-            }
-        }
-        // Se canMove se torna true, o Update normal do PlayerMovement reassumirá o controle da animação de Speed.
+        CanMove = state;
     }
 
-    // Função auxiliar, se ainda não tiver uma similar
     private bool HasParameter(Animator animator, string paramName)
     {
         if (animator == null || string.IsNullOrEmpty(paramName)) return false;
@@ -208,7 +212,6 @@ public class PlayerMovement : MonoBehaviour
 
     void CheckGrounded()
     {
-        // ... (código como antes, mas usando rb.linearVelocity.y) ...
         bool previouslyGrounded = isGrounded;
         if (groundCheckPoint == null) { isGrounded = false; return; }
         isGrounded = Physics.CheckSphere(groundCheckPoint.position, groundCheckRadius, groundLayer, QueryTriggerInteraction.Ignore);
@@ -216,10 +219,10 @@ public class PlayerMovement : MonoBehaviour
         if (!previouslyGrounded && isGrounded && isJumpingOrFalling)
         {
             isJumpingOrFalling = false;
-            if (characterAnimator != null) characterAnimator.SetTrigger("LandTrigger");
+            if (characterAnimator != null && HasParameter(characterAnimator, "LandTrigger")) characterAnimator.SetTrigger("LandTrigger");
         }
-        // Usar rb.linearVelocity.y se rb existir
-        float yVelocity = (rb != null) ? rb.linearVelocity.y : -1f; // Fallback se rb for nulo
+
+        float yVelocity = (rb != null) ? rb.linearVelocity.y : -1f;
         if (!isGrounded && !isJumpingOrFalling && yVelocity < -0.1f)
         {
             isJumpingOrFalling = true;
@@ -228,7 +231,6 @@ public class PlayerMovement : MonoBehaviour
 
     void ProcessCrouch()
     {
-        // ... (código como antes) ...
         if (wantsToCrouch)
         {
             if (!isCrouching)
@@ -258,64 +260,106 @@ public class PlayerMovement : MonoBehaviour
 
     bool CanStandUp()
     {
-        // ... (código como antes) ...
         Vector3 currentCapsuleCenter = transform.TransformPoint(capsuleCollider.center);
-        Vector3 castOrigin = currentCapsuleCenter + transform.up * (crouchingHeight / 2f - capsuleCollider.radius);
-        float castDistance = standingHeight - crouchingHeight;
+        Vector3 castOrigin = currentCapsuleCenter - transform.up * (crouchingHeight / 2f - capsuleCollider.radius * 1.01f);
+        float castDistance = standingHeight - crouchingHeight + capsuleCollider.radius * 0.02f;
         return !Physics.SphereCast(castOrigin, capsuleCollider.radius * 0.9f, transform.up, out RaycastHit _, castDistance, obstructionLayers, QueryTriggerInteraction.Ignore);
     }
 
-    void CalculateFinalMoveVelocity() // Chamado em FixedUpdate apenas se canMove == true
+    void CalculateFinalMoveVelocity() // Chamado apenas se CanMove é true
     {
         if (isCrouching) currentSpeed = crouchSpeed;
         else if (isSprinting) currentSpeed = sprintSpeed;
         else currentSpeed = walkSpeed;
 
+        // moveInputDirection já está normalizado e relativo à câmera ou jogador (se lock-on)
         Vector3 targetVelocity = moveInputDirection * currentSpeed;
-        // Mantém a velocidade Y atual do Rigidbody (para gravidade, pulo)
-        finalMoveVelocity = new Vector3(targetVelocity.x, rb != null ? rb.linearVelocity.y : 0, targetVelocity.z);
+        finalMoveVelocity = new Vector3(targetVelocity.x, 0, targetVelocity.z); // Não mexe no Y aqui, rb.velocity.y cuida disso
     }
 
-    void ApplyMovementAndRotation() // Chamado em FixedUpdate apenas se canMove == true
+    void ApplyRotation() // Chamado de FixedUpdate, apenas se CanMove é true
     {
-        if (rb == null) return;
-        rb.linearVelocity = finalMoveVelocity;
+        // Não precisa verificar rb == null ou !CanMove aqui, pois FixedUpdate já faz isso.
 
-        if (moveInputDirection.magnitude >= 0.1f)
+        if (targetLockScript != null && targetLockScript.EstaTravado && targetLockScript.AlvoTravadoAtual != null)
         {
-            Quaternion targetRotation = Quaternion.LookRotation(moveInputDirection);
-            rb.MoveRotation(Quaternion.RotateTowards(rb.rotation, targetRotation, rotationSpeed * Time.fixedDeltaTime));
+            // MODO LOCK-ON: Encarar o alvo travado
+            Vector3 direcaoParaAlvo = (targetLockScript.AlvoTravadoAtual.position - transform.position);
+            direcaoParaAlvo.y = 0; // Ignora a diferença de altura para a rotação no plano XZ
+
+            if (direcaoParaAlvo.sqrMagnitude > 0.001f) // Evita LookRotation com vetor zero
+            {
+                Quaternion rotacaoAlvoLockOn = Quaternion.LookRotation(direcaoParaAlvo);
+                // Usa rotationSpeed multiplicada para uma virada mais rápida e "firme" no alvo
+                rb.MoveRotation(Quaternion.RotateTowards(rb.rotation, rotacaoAlvoLockOn, rotationSpeed * lockOnRotationSpeedMultiplier * Time.fixedDeltaTime));
+            }
+        }
+        else
+        {
+            // MODO NORMAL: Rotação baseada na direção do input de movimento (moveInputDirection)
+            if (moveInputDirection.sqrMagnitude > 0.01f) // Se houver input de movimento
+            {
+                Quaternion rotacaoAlvoNormal = Quaternion.LookRotation(moveInputDirection);
+                rb.MoveRotation(Quaternion.RotateTowards(rb.rotation, rotacaoAlvoNormal, rotationSpeed * Time.fixedDeltaTime));
+            }
         }
     }
 
-    void ApplyJump() // Chamado em FixedUpdate apenas se canMove == true
+    void ApplyJump() // Chamado de FixedUpdate, apenas se CanMove é true
     {
-        if (rb == null) return;
-        if (jumpRequestedThisFrame && isGrounded) // Verifica se o pulo foi solicitado e ainda estamos no chão
+        if (jumpRequestedThisFrame && isGrounded) // isGrounded é atualizado em CheckGrounded()
         {
             rb.AddForce(Vector3.up * jumpForce, ForceMode.VelocityChange);
-            if (characterAnimator != null) characterAnimator.SetTrigger("JumpTrigger"); // Dispara animação aqui
+            if (characterAnimator != null && HasParameter(characterAnimator, "JumpTrigger")) characterAnimator.SetTrigger("JumpTrigger");
             isJumpingOrFalling = true; // Define o estado de pulo
-            jumpRequestedThisFrame = false; // Consome a solicitação de pulo
+            jumpRequestedThisFrame = false; // Consome a solicitação
         }
     }
 
-    void UpdateAnimatorParameters() // Chamado em Update, mas os inputs de movimento (moveInputDirection) serão zero se !canMove
+    void UpdateAnimatorParameters() // Chamado de Update
     {
         if (characterAnimator == null) return;
 
         float targetSpeedPercent = 0f;
-        // Usa moveInputDirection, que será zerado em Update se !canMove
-        if (moveInputDirection.magnitude > 0.1f && canMove) // Adicionada checagem de canMove aqui também para clareza
+        bool isCurrentlyLockedOn = (targetLockScript != null && targetLockScript.EstaTravado);
+
+        // A velocidade para o Animator deve ser baseada no moveInputDirection,
+        // que já considera se está em lock-on (strafe) ou não.
+        if (moveInputDirection.magnitude > 0.1f && CanMove) // Se há intenção de movimento e pode se mover
         {
-            if (isSprinting) targetSpeedPercent = 1.0f;
+            // Se estiver em lock-on, a velocidade de "sprint" pode não ser aplicável,
+            // ou você pode querer uma velocidade de "combate" diferente.
+            // Por ora, se estiver correndo (isSprinting) E não em lock-on, usa 1.0. Senão 0.5 para andar.
+            if (isSprinting && !isCurrentlyLockedOn) targetSpeedPercent = 1.0f;
             else targetSpeedPercent = 0.5f;
         }
-        // Se !canMove, moveInputDirection será zero, então targetSpeedPercent será zero.
 
-        characterAnimator.SetFloat("SpeedPercent", targetSpeedPercent, 0.1f, Time.deltaTime);
-        characterAnimator.SetBool("IsCrouching", isCrouching);
-        characterAnimator.SetBool("IsGrounded", isGrounded);
-        characterAnimator.SetBool("IsJumpingOrFalling", isJumpingOrFalling);
+        if (HasParameter(characterAnimator, "SpeedPercent"))
+            characterAnimator.SetFloat("SpeedPercent", targetSpeedPercent, 0.1f, Time.deltaTime);
+        else if (HasParameter(characterAnimator, "Speed")) // Fallback
+            characterAnimator.SetFloat("Speed", targetSpeedPercent * (isSprinting && !isCurrentlyLockedOn ? sprintSpeed : walkSpeed), 0.1f, Time.deltaTime);
+
+
+        if (HasParameter(characterAnimator, "IsCrouching")) characterAnimator.SetBool("IsCrouching", isCrouching);
+        if (HasParameter(characterAnimator, "IsGrounded")) characterAnimator.SetBool("IsGrounded", isGrounded);
+        if (HasParameter(characterAnimator, "IsJumpingOrFalling")) characterAnimator.SetBool("IsJumpingOrFalling", isJumpingOrFalling);
+        if (HasParameter(characterAnimator, "IsLockedOn")) characterAnimator.SetBool("IsLockedOn", isCurrentlyLockedOn); // NOVO: Parâmetro para o Animator
+    }
+
+    void OnDrawGizmosSelected()
+    {
+        if (groundCheckPoint != null)
+        {
+            Gizmos.color = Color.yellow;
+            Gizmos.DrawWireSphere(groundCheckPoint.position, groundCheckRadius);
+        }
+        if (capsuleCollider != null && isCrouching && Application.isPlaying)
+        {
+            Gizmos.color = Color.red;
+            Vector3 currentCapsuleCenter = transform.TransformPoint(capsuleCollider.center);
+            Vector3 castOrigin = currentCapsuleCenter - transform.up * (crouchingHeight / 2f - capsuleCollider.radius * 1.01f);
+            float castDistance = standingHeight - crouchingHeight + capsuleCollider.radius * 0.02f;
+            Gizmos.DrawWireSphere(castOrigin + transform.up * castDistance, capsuleCollider.radius * 0.9f);
+        }
     }
 }

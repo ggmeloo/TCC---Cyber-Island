@@ -85,7 +85,7 @@ public class DialogueSystem : MonoBehaviour
         currentDialogueData = dialogueToStart;
         currentNpcAnimator = interactor.GetNpcAnimator();
 
-        playerMovement.SetMovementEnabled(false);
+        playerMovement.SetCanMove(false);
         if (playerAnimator != null && HasParameter(playerAnimator, IS_TALKING_PARAM)) playerAnimator.SetBool(IS_TALKING_PARAM, true);
         if (currentNpcAnimator != null && HasParameter(currentNpcAnimator, IS_TALKING_PARAM)) currentNpcAnimator.SetBool(IS_TALKING_PARAM, true);
 
@@ -116,7 +116,7 @@ public class DialogueSystem : MonoBehaviour
         dialogueJustEndedThisFrame = true;
         // -------------------------
 
-        if (playerMovement != null) playerMovement.SetMovementEnabled(true);
+        if (playerMovement != null) playerMovement.SetCanMove(true);
         if (playerAnimator != null && HasParameter(playerAnimator, IS_TALKING_PARAM)) playerAnimator.SetBool(IS_TALKING_PARAM, false);
         if (currentNpcAnimator != null && HasParameter(currentNpcAnimator, IS_TALKING_PARAM)) currentNpcAnimator.SetBool(IS_TALKING_PARAM, false);
 

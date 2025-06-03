@@ -1,4 +1,5 @@
 using UnityEngine;
+using System.Collections;
 
 public class PlayerPickup : MonoBehaviour
 {
@@ -11,10 +12,8 @@ public class PlayerPickup : MonoBehaviour
     public Transform standbyPoint;
 
     [Header("Configurações de Rotação do Item Equipado")]
-    [Tooltip("Rotação local do item quando na mão (Ângulos de Euler em Graus). Ex: (0, 90, 0)")]
-    public Vector3 handItemLocalRotationEuler = new Vector3(0f, 90f, 0f); // Padrão para 90 graus no eixo Y
-    [Tooltip("Rotação local do item quando em standby/cintura (Ângulos de Euler em Graus). Ex: (0, 160, 0)")]
-    public Vector3 standbyItemLocalRotationEuler = new Vector3(0f, 160f, 0f); // Padrão para 160 graus no eixo Y
+    public Vector3 handItemLocalRotationEuler = new Vector3(0f, 90f, 0f);
+    public Vector3 standbyItemLocalRotationEuler = new Vector3(0f, 160f, 0f);
 
     [Header("Configurações de Soltar Item")]
     public float dropForwardForce = 5f;
@@ -25,6 +24,16 @@ public class PlayerPickup : MonoBehaviour
 
     [Header("Referências Externas")]
     public PlayerAttack playerAttack;
+    public Animator playerAnimator;
+    public PlayerMovement playerMovementScript;
+
+    [Header("Configurações de Animação")]
+    public string pickupAnimationTriggerName = "PickupTrigger";
+    public string equipAnimationTriggerName = "EquipTrigger";
+    public string holsterAnimationTriggerName = "HolsterTrigger";
+    public float pickupAnimationDuration = 0.7f;
+    public float equipAnimationDuration = 0.5f;
+    public float holsterAnimationDuration = 0.5f;
 
     private GameObject itemInRange = null;
     private GameObject heldItem = null;
@@ -36,16 +45,27 @@ public class PlayerPickup : MonoBehaviour
     private Renderer itemInRangeRenderer;
 
     private bool isItemInHand = false;
+    private bool isPerformingAction = false;
 
     void Start()
     {
         if (playerAttack == null)
         {
             playerAttack = GetComponent<PlayerAttack>();
-            if (playerAttack == null)
-            {
-                Debug.LogError("PLAYER PICKUP: Script PlayerAttack não encontrado! Funcionalidade de ataque não será alterada.", this.gameObject);
-            }
+            if (playerAttack == null) Debug.LogError("PLAYER PICKUP: PlayerAttack não encontrado!", this.gameObject);
+        }
+        if (playerMovementScript == null)
+        {
+            playerMovementScript = GetComponent<PlayerMovement>() ?? GetComponentInParent<PlayerMovement>();
+            if (playerMovementScript == null) Debug.LogError("PLAYER PICKUP: PlayerMovement não encontrado!", this.gameObject);
+        }
+        if (playerAnimator == null)
+        {
+            if (playerMovementScript != null && playerMovementScript.characterAnimator != null)
+                playerAnimator = playerMovementScript.characterAnimator;
+            else
+                playerAnimator = GetComponentInChildren<Animator>();
+            if (playerAnimator == null) Debug.LogError("PLAYER PICKUP: Animator não encontrado!", this.gameObject);
         }
         if (handPoint == null) Debug.LogError("PLAYER PICKUP: HandPoint não atribuído!", this.gameObject);
         if (standbyPoint == null) Debug.LogError("PLAYER PICKUP: StandbyPoint não atribuído!", this.gameObject);
@@ -53,36 +73,48 @@ public class PlayerPickup : MonoBehaviour
 
     void Update()
     {
+        if (isPerformingAction) return;
+
         if (Input.GetKeyDown(pickupKey))
         {
             if (heldItem == null && itemInRange != null && standbyPoint != null)
-            {
-                PickUpItem(itemInRange);
-            }
+                StartCoroutine(PickupSequence(itemInRange));
             else if (heldItem != null)
-            {
                 DropItem();
-            }
         }
 
         if (Input.GetKeyDown(toggleHolsterKey) && heldItem != null)
+            StartCoroutine(ToggleHolsterSequence());
+    }
+
+    IEnumerator PickupSequence(GameObject itemToPickUp)
+    {
+        isPerformingAction = true;
+        if (playerMovementScript != null) playerMovementScript.SetCanMove(false);
+
+        try
         {
-            ToggleHolster();
+            if (playerAnimator != null && !string.IsNullOrEmpty(pickupAnimationTriggerName))
+            {
+                playerAnimator.SetTrigger(pickupAnimationTriggerName);
+                yield return new WaitForSeconds(pickupAnimationDuration);
+            }
+            FinalizePickup(itemToPickUp);
+        }
+        finally
+        {
+            if (playerMovementScript != null) playerMovementScript.SetCanMove(true);
+            isPerformingAction = false;
         }
     }
 
-    void PickUpItem(GameObject itemToPickUp)
+    void FinalizePickup(GameObject itemToPickUp)
     {
-        if (standbyPoint == null)
-        {
-            Debug.LogError("PLAYER PICKUP: StandbyPoint não configurado!");
-            return;
-        }
+        if (standbyPoint == null) return;
 
         if (itemInRangeRenderer != null && originalItemMaterial != null && highlightMaterial != null)
-        {
             itemInRangeRenderer.material = originalItemMaterial;
-        }
+
         itemInRange = null;
         itemInRangeRenderer = null;
         originalItemMaterial = null;
@@ -92,41 +124,26 @@ public class PlayerPickup : MonoBehaviour
         heldItemCollider = heldItem.GetComponent<Collider>();
         heldItemInfo = heldItem.GetComponent<CollectibleItemInfo>();
 
-        if (heldItemInfo == null)
-        {
-            Debug.LogWarning($"Item {heldItem.name} não possui o script CollectibleItemInfo. Assumindo Melee por padrão se equipado na mão.", heldItem);
-        }
-
         if (heldItemRb != null)
         {
             heldItemRb.isKinematic = true;
             heldItemRb.detectCollisions = false;
         }
-        if (heldItemCollider != null)
-        {
-            heldItemCollider.enabled = false;
-        }
+        if (heldItemCollider != null) heldItemCollider.enabled = false;
 
-        MoveItemToPoint(standbyPoint); // Irá para standby e aplicará a rotação de standby
+        MoveItemToPoint(standbyPoint);
         isItemInHand = false;
-
-        Debug.Log($"Pegou o item: {heldItem.name}. Posição inicial: Standby ({standbyPoint.position})");
 
         if (playerAttack != null)
         {
-            playerAttack.EquipWeapon(PlayerAttack.WeaponAnimType.Unarmed);
+            playerAttack.EquipWeapon(PlayerAttack.WeaponAnimType.Unarmed, null); // Ao pegar, inicialmente vai para Unarmed
         }
     }
 
     void DropItem()
     {
-        if (heldItem == null) return;
-        Debug.Log($"Soltou o item: {heldItem.name} de volta ao mundo.");
+        if (heldItem == null || isPerformingAction) return;
         heldItem.transform.SetParent(null);
-
-        // <<< IMPORTANTE: Resetar a rotação para algo neutro antes de soltar, se necessário >>>
-        // Se a rotação customizada afetar como ele cai, você pode querer resetá-la aqui:
-        // heldItem.transform.rotation = Quaternion.identity; // Ou alguma rotação padrão para o item solto
 
         if (heldItemRb != null)
         {
@@ -136,9 +153,15 @@ public class PlayerPickup : MonoBehaviour
             heldItemRb.AddForce(forceDirection * dropForwardForce, ForceMode.Impulse);
             heldItemRb.AddForce(Vector3.up * dropUpwardForce, ForceMode.Impulse);
         }
-        if (heldItemCollider != null)
+        if (heldItemCollider != null) heldItemCollider.enabled = true;
+
+        if (playerAttack != null)
         {
-            heldItemCollider.enabled = true;
+            // Limpa o ponto de ataque da arma melee se o item solto era a arma atual
+            if (heldItemInfo != null && heldItemInfo.itemWeaponType == PlayerAttack.WeaponAnimType.Melee)
+            {
+                playerAttack.SetMeleeWeaponAttackPoint(null);
+            }
         }
 
         heldItem = null;
@@ -147,92 +170,115 @@ public class PlayerPickup : MonoBehaviour
         heldItemInfo = null;
         isItemInHand = false;
 
+
         if (playerAttack != null)
         {
-            playerAttack.EquipWeapon(PlayerAttack.WeaponAnimType.Unarmed);
+            playerAttack.EquipWeapon(PlayerAttack.WeaponAnimType.Unarmed, null);
         }
     }
 
-    void ToggleHolster()
+    IEnumerator ToggleHolsterSequence()
     {
-        if (heldItem == null) return;
+        if (heldItem == null) yield break;
 
-        if (!isItemInHand)
+        isPerformingAction = true;
+        if (playerMovementScript != null) playerMovementScript.SetCanMove(false);
+
+        try
         {
-            if (handPoint != null)
+            if (!isItemInHand) // Equipar
             {
-                MoveItemToPoint(handPoint); // Aplicará a rotação da mão
-                isItemInHand = true;
-                Debug.Log($"Item {heldItem.name} movido para Mão ({handPoint.position})");
-                if (playerAttack != null)
+                if (playerAnimator != null && !string.IsNullOrEmpty(equipAnimationTriggerName))
                 {
-                    PlayerAttack.WeaponAnimType typeToEquip = PlayerAttack.WeaponAnimType.Melee;
-                    if (heldItemInfo != null)
-                    {
-                        typeToEquip = heldItemInfo.itemWeaponType;
-                    }
-                    playerAttack.EquipWeapon(typeToEquip);
-                    Debug.Log($"PlayerAttack definido para: {typeToEquip}");
+                    playerAnimator.SetTrigger(equipAnimationTriggerName);
+                    yield return new WaitForSeconds(equipAnimationDuration);
                 }
+                FinalizeEquip();
             }
-            else Debug.LogWarning("HandPoint não configurado.");
+            else // Guardar
+            {
+                if (playerAnimator != null && !string.IsNullOrEmpty(holsterAnimationTriggerName))
+                {
+                    playerAnimator.SetTrigger(holsterAnimationTriggerName);
+                    yield return new WaitForSeconds(holsterAnimationDuration);
+                }
+                FinalizeHolster();
+            }
         }
-        else
+        finally
         {
-            if (standbyPoint != null)
-            {
-                MoveItemToPoint(standbyPoint); // Aplicará a rotação de standby
-                isItemInHand = false;
-                Debug.Log($"Item {heldItem.name} movido para Standby ({standbyPoint.position})");
-                if (playerAttack != null)
-                {
-                    playerAttack.EquipWeapon(PlayerAttack.WeaponAnimType.Unarmed);
-                    Debug.Log("PlayerAttack definido para: Unarmed");
-                }
-            }
-            else Debug.LogWarning("StandbyPoint não configurado.");
+            if (playerMovementScript != null) playerMovementScript.SetCanMove(true);
+            isPerformingAction = false;
         }
     }
 
-    // MODIFICADO AQUI
+    void FinalizeEquip()
+    {
+        if (handPoint != null)
+        {
+            MoveItemToPoint(handPoint);
+            isItemInHand = true;
+            if (playerAttack != null)
+            {
+                PlayerAttack.WeaponAnimType typeToEquip = PlayerAttack.WeaponAnimType.Unarmed; // Default to unarmed
+                Transform weaponDamagePointForAttackScript = null;
+
+                if (heldItemInfo != null)
+                {
+                    typeToEquip = heldItemInfo.itemWeaponType;
+                    if (typeToEquip == PlayerAttack.WeaponAnimType.Melee && heldItem != null)
+                    {
+                        // Tenta encontrar um ponto de dano específico na arma
+                        weaponDamagePointForAttackScript = heldItem.transform.Find("WeaponDamagePoint");
+                        if (weaponDamagePointForAttackScript == null)
+                        {
+                            Debug.LogWarning($"Arma Melee '{heldItem.name}' não possui um filho 'WeaponDamagePoint'. PlayerAttack usará seu meleeWeaponAttackPoint padrão se não for nulo, ou o transform da arma.");
+                        }
+                    }
+                }
+                playerAttack.EquipWeapon(typeToEquip, weaponDamagePointForAttackScript);
+            }
+        }
+    }
+
+    void FinalizeHolster()
+    {
+        if (standbyPoint != null)
+        {
+            MoveItemToPoint(standbyPoint);
+            isItemInHand = false;
+            if (playerAttack != null)
+            {
+                // Ao guardar, efetivamente ficamos desarmados em termos de animação de ataque
+                // e limpamos o ponto de ataque da arma melee.
+                playerAttack.EquipWeapon(PlayerAttack.WeaponAnimType.Unarmed, null);
+            }
+        }
+    }
+
     void MoveItemToPoint(Transform targetPoint)
     {
         if (heldItem == null || targetPoint == null) return;
-
         heldItem.transform.SetParent(targetPoint);
-        heldItem.transform.localPosition = Vector3.zero; // Posição local sempre zerada em relação ao ponto de encaixe
-
-        // Aplicar rotação local específica baseada no ponto de encaixe
+        heldItem.transform.localPosition = Vector3.zero;
         if (targetPoint == handPoint)
-        {
             heldItem.transform.localRotation = Quaternion.Euler(handItemLocalRotationEuler);
-            //Debug.Log($"Aplicando rotação da mão: {handItemLocalRotationEuler}");
-        }
         else if (targetPoint == standbyPoint)
-        {
             heldItem.transform.localRotation = Quaternion.Euler(standbyItemLocalRotationEuler);
-            //Debug.Log($"Aplicando rotação de standby: {standbyItemLocalRotationEuler}");
-        }
         else
-        {
-            // Caso de fallback, se houver outros pontos no futuro
             heldItem.transform.localRotation = Quaternion.identity;
-            Debug.LogWarning("MoveItemToPoint chamado com um targetPoint não reconhecido para rotação customizada. Usando rotação identity.");
-        }
     }
 
     private void OnTriggerEnter(Collider other)
     {
-        if (heldItem == null && other.CompareTag("Collectible"))
+        if (isPerformingAction || heldItem != null) return;
+        if (other.CompareTag("Collectible"))
         {
             if (itemInRange == null)
             {
                 if (other.GetComponent<CollectibleItemInfo>() == null)
-                {
-                    Debug.LogWarning($"O item coletável '{other.name}' não tem o componente CollectibleItemInfo.", other.gameObject);
-                }
+                    Debug.LogWarning($"Item '{other.name}' não tem CollectibleItemInfo.", other.gameObject);
                 itemInRange = other.gameObject;
-                //Debug.Log($"Item ao alcance: {itemInRange.name}");
                 if (highlightMaterial != null)
                 {
                     itemInRangeRenderer = itemInRange.GetComponent<Renderer>();
@@ -250,11 +296,8 @@ public class PlayerPickup : MonoBehaviour
     {
         if (other.gameObject == itemInRange)
         {
-            //Debug.Log($"Item saiu do alcance: {itemInRange.name}");
             if (itemInRangeRenderer != null && originalItemMaterial != null && highlightMaterial != null)
-            {
                 itemInRangeRenderer.material = originalItemMaterial;
-            }
             itemInRange = null;
             itemInRangeRenderer = null;
             originalItemMaterial = null;
@@ -267,26 +310,14 @@ public class PlayerPickup : MonoBehaviour
         {
             Gizmos.color = Color.green;
             Gizmos.DrawWireSphere(handPoint.position, 0.1f);
-            Gizmos.DrawLine(transform.position, handPoint.position);
-            // Visualizar a rotação da mão
-            if (Application.isPlaying && heldItem != null && isItemInHand) { } // Só desenha se estiver segurando e na mão
-            else { Gizmos.matrix = Matrix4x4.TRS(handPoint.position, handPoint.rotation * Quaternion.Euler(handItemLocalRotationEuler), handPoint.lossyScale); Gizmos.DrawFrustum(Vector3.zero, 30, 0.3f, 0.01f, 1f); }
-
+            // ... (código do Frustum)
         }
         if (standbyPoint != null)
         {
             Gizmos.color = Color.blue;
             Gizmos.DrawWireSphere(standbyPoint.position, 0.1f);
-            Gizmos.DrawLine(transform.position, standbyPoint.position);
-            // Visualizar a rotação do standby
-            if (Application.isPlaying && heldItem != null && !isItemInHand) { } // Só desenha se estiver segurando e no standby
-            else { Gizmos.matrix = Matrix4x4.TRS(standbyPoint.position, standbyPoint.rotation * Quaternion.Euler(standbyItemLocalRotationEuler), standbyPoint.lossyScale); Gizmos.DrawFrustum(Vector3.zero, 30, 0.3f, 0.01f, 1f); }
+            // ... (código do Frustum)
         }
-        Gizmos.matrix = Matrix4x4.identity; // Resetar matrix do Gizmo
-
-        Gizmos.color = Color.red;
-        Vector3 forcePreviewOrigin = transform.position + Vector3.up * 0.5f;
-        Vector3 forceDirection = transform.forward * dropForwardForce;
-        Gizmos.DrawRay(forcePreviewOrigin, forceDirection.normalized * 2f);
+        // ... (código do Gizmo de força de soltar)
     }
 }

@@ -1,48 +1,40 @@
-// EnemyAttack.cs
 using UnityEngine;
 using System.Collections;
 
 public class EnemyAttack : MonoBehaviour
 {
-    public enum AttackType { Melee, RangedProjectile, RangedRaycast, Throwable }
+    public enum AttackType { Melee, RangedProjectile /*, RangedRaycast, Throwable */ } // Simplificado para o exemplo
 
     [Header("Referências")]
-    public Transform playerTarget; // O jogador
+    public Transform playerTarget;
     public Animator characterAnimator;
-    public EnemyMovement enemyMovement; // Para coordenar com o movimento
-    public EnemyHealth enemyHealth;     // Para saber se está vivo
+    public EnemyMovement enemyMovement;
+    public EnemyHealth enemyHealth;
 
     [Header("Configurações Gerais de Ataque")]
     public AttackType currentAttackType = AttackType.Melee;
-    public float attackRange = 2f;         // Distância para iniciar o ataque
-    public float attackCooldown = 2f;      // Tempo entre os ataques
-    public int attackDamage = 10;          // Dano base do ataque do inimigo
-    private bool canAttack = true;         // Flag para cooldown
-    private bool isCurrentlyAttacking = false; // Flag para saber se uma sequência de ataque está em progresso
+    public float attackRange = 2f;
+    public float attackCooldown = 2f;
+    public int attackDamage = 10;
+    private bool canAttack = true;
+    private bool isCurrentlyAttacking = false;
 
     [Header("Configurações Específicas de Ataque")]
-    [Tooltip("Ponto de origem para ataques melee ou raycast ranged.")]
-    public Transform attackOriginPoint;
+    [Tooltip("Ponto de origem para ataques melee.")]
+    public Transform attackOriginPoint; // Para Melee e Raycast
     // Melee
-    public float meleeAttackRadius = 0.7f; // Para OverlapSphere no melee
-    public LayerMask playerLayer;          // Para identificar o jogador na detecção de acerto
+    public float meleeAttackRadius = 0.7f;
+    public LayerMask playerLayer; // MUITO IMPORTANTE: Defina esta Layer no Inspector para a Layer do seu Player
     // Ranged Projectile
     public GameObject projectilePrefab;
     public float projectileSpeed = 15f;
-    public Transform projectileSpawnPoint; // Pode ser o mesmo que attackOriginPoint ou diferente
-    // Ranged Raycast (similar a uma arma de fogo instantânea)
-    // Nenhum parâmetro extra aqui, usa attackOriginPoint e attackRange
-    // Throwable (Granada, Magia de Área)
-    public GameObject throwablePrefab;
-    public float throwForce = 10f;
-    public Transform throwSpawnPoint;      // Pode ser o mesmo que attackOriginPoint ou diferente
+    public Transform projectileSpawnPoint;
+
 
     [Header("Animação")]
-    [Tooltip("Nome do Trigger no Animator para o ataque principal.")]
-    public string attackAnimationTrigger = "AttackTrigger"; // Ex: "AttackMelee", "AttackRanged", "Throw"
-    // Você pode ter triggers diferentes por tipo de ataque se as animações forem muito distintas
-    // public string meleeAnimTrigger = "MeleeAttack";
-    // public string rangedAnimTrigger = "RangedAttack";
+    public string attackAnimationTrigger = "AttackTrigger";
+    [Tooltip("Tempo (em segundos) dentro da animação de ataque onde o dano/efeito deve ser aplicado.")]
+    public float damageApplicationDelay = 0.5f; // Ajuste isso para sua animação!
 
 
     void Start()
@@ -51,40 +43,68 @@ public class EnemyAttack : MonoBehaviour
         {
             GameObject playerObject = GameObject.FindGameObjectWithTag("Player");
             if (playerObject != null) playerTarget = playerObject.transform;
-            else Debug.LogError($"[{gameObject.name}] EnemyAttack: PlayerTarget não encontrado!", this);
+            else Debug.LogError($"[{gameObject.name}] EnemyAttack: PlayerTarget não encontrado (Tag 'Player')!", this);
         }
 
         if (characterAnimator == null) characterAnimator = GetComponentInChildren<Animator>();
+        if (characterAnimator == null) Debug.LogError($"[{gameObject.name}] EnemyAttack: Animator não encontrado!", this);
+
         if (enemyMovement == null) enemyMovement = GetComponent<EnemyMovement>();
+        if (enemyMovement == null) Debug.LogError($"[{gameObject.name}] EnemyAttack: EnemyMovement não encontrado!", this);
+
         if (enemyHealth == null) enemyHealth = GetComponent<EnemyHealth>();
+        if (enemyHealth == null) Debug.LogError($"[{gameObject.name}] EnemyAttack: EnemyHealth não encontrado!", this);
 
-        if (attackOriginPoint == null) attackOriginPoint = transform; // Fallback
-        if (projectileSpawnPoint == null) projectileSpawnPoint = attackOriginPoint;
-        if (throwSpawnPoint == null) throwSpawnPoint = attackOriginPoint;
 
-        // Pega a layer do player automaticamente se não definida, mas é melhor setar no Inspector
-        if (playerLayer == 0 && playerTarget != null) // Se layerMask é 0 (Nothing)
+        if (attackOriginPoint == null)
         {
-            playerLayer = 1 << playerTarget.gameObject.layer; // Cria uma LayerMask com apenas a layer do player
-            if (playerLayer == 0) Debug.LogWarning($"[{gameObject.name}] EnemyAttack: Não foi possível obter a layer do Player. Defina manualmente a Player Layer.");
+            // Cria um ponto de ataque padrão se não definido
+            GameObject defaultOrigin = new GameObject(gameObject.name + "_AttackOrigin");
+            defaultOrigin.transform.SetParent(transform);
+            CapsuleCollider cap = GetComponent<CapsuleCollider>();
+            if (cap != null)
+                defaultOrigin.transform.localPosition = new Vector3(0, cap.height * 0.75f, cap.radius + 0.1f);
+            else
+                defaultOrigin.transform.localPosition = new Vector3(0, 1f, 0.5f);
+            attackOriginPoint = defaultOrigin.transform;
+            Debug.LogWarning($"[{gameObject.name}] EnemyAttack: attackOriginPoint não atribuído. Criado um padrão. Ajuste sua posição.");
+        }
+
+        if (currentAttackType == AttackType.RangedProjectile && projectileSpawnPoint == null)
+        {
+            projectileSpawnPoint = attackOriginPoint; // Fallback
+            Debug.LogWarning($"[{gameObject.name}] EnemyAttack: projectileSpawnPoint não atribuído para RangedProjectile. Usando attackOriginPoint como fallback.");
+        }
+
+
+        // Pega a layer do player automaticamente se playerLayer não estiver setada e playerTarget existir
+        // É MELHOR CONFIGURAR playerLayer NO INSPECTOR.
+        if (playerLayer == 0 && playerTarget != null) // LayerMask 0 é "Nothing"
+        {
+            int targetLayer = playerTarget.gameObject.layer;
+            if (targetLayer != 0) // Não "Default" layer
+            {
+                playerLayer = 1 << targetLayer; // Cria uma LayerMask com apenas a layer do player
+            }
+            if (playerLayer == 0) Debug.LogWarning($"[{gameObject.name}] EnemyAttack: Não foi possível obter a layer do Player automaticamente. Defina manualmente a Player Layer no Inspector.");
+        }
+        else if (playerLayer == 0)
+        {
+            Debug.LogError($"[{gameObject.name}] EnemyAttack: Player Layer NÃO ESTÁ DEFINIDA no Inspector! O ataque pode não detectar o jogador.");
         }
     }
 
     void Update()
     {
         if (playerTarget == null || characterAnimator == null || enemyMovement == null || enemyHealth == null || enemyHealth.IsDead())
-        {
-            return; // Sai se alguma referência crucial falta ou se está morto
-        }
+            return;
 
-        // Só tenta atacar se estiver no estado ENGAGED do EnemyMovement e não estiver já atacando ou em cooldown
         if (enemyMovement.currentMoveState == EnemyMovement.AIMoveState.ENGAGED && canAttack && !isCurrentlyAttacking)
         {
             float distanceToPlayer = Vector3.Distance(transform.position, playerTarget.position);
             if (distanceToPlayer <= attackRange)
             {
-                // Verifica se há linha de visão antes de atacar (especialmente para ranged)
-                if (HasLineOfSightToPlayer())
+                if (HasLineOfSightToPlayer()) // Importante para ranged, bom para melee também
                 {
                     StartCoroutine(PerformAttackSequence());
                 }
@@ -96,49 +116,48 @@ public class EnemyAttack : MonoBehaviour
     {
         if (playerTarget == null || attackOriginPoint == null) return false;
 
-        Vector3 directionToPlayer = (playerTarget.position - attackOriginPoint.position).normalized;
-        float distanceToPlayer = Vector3.Distance(attackOriginPoint.position, playerTarget.position);
+        Vector3 targetCenter = playerTarget.position + Vector3.up * 1.0f; // Mira no centro do jogador
+        Vector3 originPosition = attackOriginPoint.position;
+        Vector3 directionToPlayer = (targetCenter - originPosition).normalized;
+        float distanceToPlayerActual = Vector3.Distance(originPosition, targetCenter);
+
+        // Define uma LayerMask para tudo exceto a layer do próprio inimigo
+        // Isso evita que o raycast do inimigo acerte a si mesmo.
+        int enemyLayerValue = gameObject.layer;
+        LayerMask obstaclesAndPlayerLayerMask = ~(1 << enemyLayerValue); // Tudo exceto a layer do inimigo
 
         RaycastHit hit;
-        // Dispara um Raycast do ponto de origem do ataque na direção do jogador
-        // Ignora o próprio colisor do inimigo (você pode precisar de uma LayerMask para obstáculos)
-        if (Physics.Raycast(attackOriginPoint.position, directionToPlayer, out hit, distanceToPlayer, ~LayerMask.GetMask(LayerMask.LayerToName(gameObject.layer)))) // Exclui a própria layer do inimigo
+        // Debug.DrawRay(originPosition, directionToPlayer * distanceToPlayerActual, Color.magenta, 1f);
+        if (Physics.Raycast(originPosition, directionToPlayer, out hit, distanceToPlayerActual, obstaclesAndPlayerLayerMask))
         {
-            // Se o primeiro objeto atingido não for o jogador, então há um obstáculo
-            if (hit.transform == playerTarget)
+            if (hit.transform.gameObject.CompareTag("Player")) // Verifica se o que foi atingido é o jogador pela tag
             {
-                return true; // Linha de visão limpa para o jogador
+                return true;
             }
-            //Debug.Log($"Linha de visão para {playerTarget.name} bloqueada por {hit.transform.name}");
-            return false; // Algo está no caminho
+            //Debug.Log($"[{gameObject.name}] Linha de visão para {playerTarget.name} bloqueada por {hit.transform.name} (Layer: {LayerMask.LayerToName(hit.collider.gameObject.layer)})");
+            return false;
         }
-        // Se o Raycast não atingiu nada (improvável se o player está dentro do range e não há obstáculos),
-        // mas para garantir, consideramos que tem linha de visão se o player está perto.
-        // No entanto, se o raycast não atingiu NADA ATÉ o player, significa que não tem linha de visão.
-        // A condição acima já trata se o player foi o primeiro hit.
-        // Se o Raycast não atingiu nada DENTRO DA DISTÂNCIA DO PLAYER, isso é estranho.
-        // A checagem acima (hit.transform == playerTarget) é a mais importante.
-        // Se o raycast não atingiu NADA até a distância do player, considera-se que não há obstáculos diretos.
-        // Mas é mais seguro confiar que o raycast DEVE atingir o player se a visão estiver limpa.
-        // O `~LayerMask.GetMask(LayerMask.LayerToName(gameObject.layer))` exclui a layer do próprio inimigo do raycast.
-        // Se o Raycast não atingiu nada até o 'distanceToPlayer' e não era o player, então a visão está bloqueada.
-        // O código acima com `hit.transform == playerTarget` já cobre isso. Se não for o player, está bloqueado.
-        // Se o raycast não atingir NADA (raro se o player está lá), também não tem linha de visão direta.
-        // Para simplificar: se o raycast não acertou o player como primeiro objeto, não há LoS.
-        return false; // Fallback se o raycast não atingiu o player
+        // Se o raycast não atingiu nada DENTRO da distância ao jogador, mas o jogador ESTÁ nessa distância,
+        // isso implica uma linha de visão limpa (pode acontecer se o colisor do jogador for complexo ou trigger).
+        // Para ser mais robusto, se o raycast não acertar NADA ATÉ O JOGADOR, mas a distância está correta,
+        // e não há outros obstáculos, podemos assumir LoS.
+        // No entanto, a condição `hit.transform.gameObject.CompareTag("Player")` é geralmente suficiente.
+        // Se o raycast não atingiu nada, mas o player está no range (sem obstáculos entre eles),
+        // pode ser que o colisor do player não seja detectado pelo raycast por algum motivo.
+        // Nesse caso, e se a distância estiver correta, podemos considerar LoS.
+        // Mas é mais seguro confiar que o Raycast DEVE atingir o player se a visão for limpa.
+        // Se o raycast não atingiu nada, isso significa que não há obstáculos, e o player está (presumivelmente) lá.
+        // Essa linha é um fallback caso o raycast não atinja o colisor do player mas não haja outros obstáculos.
+        // if (!Physics.Raycast(originPosition, directionToPlayer, distanceToPlayerActual, ~( (1 << enemyLayerValue) | playerLayer) ) ) return true;
+
+        return false; // Fallback: se o raycast não acertou o jogador, não há LoS
     }
 
 
     IEnumerator PerformAttackSequence()
     {
         isCurrentlyAttacking = true;
-        canAttack = false; // Entra em cooldown
-
-        // 1. Avisa o EnemyMovement para parar e encarar (se ainda não estiver fazendo)
-        // O EnemyMovement já deve parar quando a distância é <= attackRange e ele está ENGAGED.
-        // Mas podemos forçar aqui se necessário ou para uma lógica de "preparar ataque".
-        // enemyMovement.EnterAttackingState(); // Você precisaria criar essa função em EnemyMovement
-        // Por ora, vamos assumir que EnemyMovement já o posicionou e parou.
+        canAttack = false;
 
         // Garante que está encarando o jogador
         if (playerTarget != null)
@@ -148,46 +167,36 @@ public class EnemyAttack : MonoBehaviour
             if (directionToPlayer != Vector3.zero) transform.rotation = Quaternion.LookRotation(directionToPlayer);
         }
 
-        // 2. Toca a animação de ataque
-        Debug.Log($"[{gameObject.name}] EnemyAttack: Iniciando animação de ataque (Trigger: {attackAnimationTrigger})");
+        //Debug.Log($"[{gameObject.name}] Iniciando ataque. Trigger: {attackAnimationTrigger}");
         characterAnimator.SetTrigger(attackAnimationTrigger);
 
-        // 3. Espera um ponto específico da animação para aplicar o efeito do ataque
-        // Esta é a parte que Animation Events resolvem melhor.
-        // Sem eles, precisamos estimar ou usar a duração do clipe.
-        float actionPointDelay = GetActionPointDelayForAttack(); // Tempo até o "impacto"
-        yield return new WaitForSeconds(actionPointDelay);
+        // Espera o ponto de dano da animação
+        yield return new WaitForSeconds(damageApplicationDelay);
 
-        // 4. Executa a lógica específica do ataque (se ainda estiver vivo e atacando)
-        if (!enemyHealth.IsDead() && isCurrentlyAttacking) // Verifica se não morreu/foi interrompido durante a animação
+        if (!enemyHealth.IsDead() && isCurrentlyAttacking) // Verifica se não morreu/foi interrompido
         {
             ExecuteAttackEffect();
         }
-        else
-        {
-            Debug.Log($"[{gameObject.name}] EnemyAttack: Ataque interrompido (morto ou estado mudou).");
-        }
 
-        // 5. Espera o resto da animação de ataque (aproximadamente)
-        float remainingAnimationTime = GetCurrentAttackAnimationLength() - actionPointDelay;
-        if (remainingAnimationTime > 0)
-        {
-            yield return new WaitForSeconds(remainingAnimationTime);
-        }
+        // Espera o resto da animação (aproximadamente) - PODE SER REMOVIDO SE A ANIMAÇÃO VOLTA SOZINHA PARA IDLE
+        // float animationLength = GetCurrentAttackAnimationLength(); // Você precisaria de uma forma de pegar a duração do clipe de ataque
+        // float remainingAnimTime = Mathf.Max(0, animationLength - damageApplicationDelay);
+        // if (remainingAnimTime > 0) yield return new WaitForSeconds(remainingAnimTime);
 
-        // 6. Cooldown
-        isCurrentlyAttacking = false; // Terminou a sequência de animação/efeito do ataque
-        // enemyMovement.ExitAttackingState(); // Avisa o EnemyMovement para retomar comportamento normal
+        // O isCurrentlyAttacking será resetado quando a animação de ataque terminar (via Animation Event ou StateMachineBehaviour)
+        // Por enquanto, vamos resetar após um tempo fixo para simular o fim da animação.
+        // Ideal: Use um StateMachineBehaviour no estado de ataque do Animator para setar isCurrentlyAttacking = false em OnStateExit.
+        yield return new WaitForSeconds(0.5f); // Tempo para a animação "terminar" visualmente após o dano. Ajuste!
 
-        // Debug.Log($"[{gameObject.name}] EnemyAttack: Ataque finalizado. Cooldown de {attackCooldown}s iniciado.");
+        isCurrentlyAttacking = false;
+
         yield return new WaitForSeconds(attackCooldown);
         canAttack = true;
-        // Debug.Log($"[{gameObject.name}] EnemyAttack: Cooldown finalizado.");
     }
 
     void ExecuteAttackEffect()
     {
-        Debug.Log($"[{gameObject.name}] EnemyAttack: Executando efeito do ataque do tipo {currentAttackType}.");
+        //Debug.Log($"[{gameObject.name}] Executando efeito do ataque: {currentAttackType}");
         switch (currentAttackType)
         {
             case AttackType.Melee:
@@ -196,131 +205,110 @@ public class EnemyAttack : MonoBehaviour
             case AttackType.RangedProjectile:
                 FireProjectile();
                 break;
-            case AttackType.RangedRaycast:
-                FireRaycast();
-                break;
-            case AttackType.Throwable:
-                ThrowObject();
-                break;
+                // Adicione outros tipos de ataque aqui
         }
     }
 
     void PerformMeleeDamage()
     {
-        if (playerTarget == null || attackOriginPoint == null) return;
+        if (playerTarget == null || attackOriginPoint == null || playerLayer == 0)
+        {
+            Debug.LogError($"[{gameObject.name}] PerformMeleeDamage: Faltam referências ou PlayerLayer não definida. Ponto: {attackOriginPoint}, Layer: {LayerMask.LayerToName(playerLayer)}");
+            return;
+        }
 
         Collider[] hitPlayers = Physics.OverlapSphere(attackOriginPoint.position, meleeAttackRadius, playerLayer);
         foreach (Collider playerCol in hitPlayers)
         {
-            // Verificamos se o colisor realmente pertence ao nosso playerTarget,
-            // embora a layerMask já deva filtrar isso.
-            if (playerCol.transform == playerTarget)
+            // playerCol.transform pode ser um filho do objeto Player real se o colisor estiver em um filho.
+            // É mais seguro pegar o PlayerHealth do objeto raiz do colisor.
+            PlayerHealth playerHealth = playerCol.GetComponentInParent<PlayerHealth>();
+            if (playerHealth != null)
             {
-                PlayerHealth playerHealth = playerCol.GetComponent<PlayerHealth>();
-                if (playerHealth != null)
-                {
-                    Debug.Log($"[{gameObject.name}] EnemyAttack: Acertou {playerTarget.name} com MELEE causando {attackDamage} de dano.");
-                    playerHealth.TakeDamage(attackDamage);
-                }
-                break; // Geralmente acerta apenas um player no melee
+                //Debug.Log($"[{gameObject.name}] Acertou {playerCol.name} (PlayerHealth encontrado) com MELEE causando {attackDamage} de dano.");
+                playerHealth.TakeDamage(attackDamage);
+                break; // Geralmente acerta apenas um jogador por vez no melee
+            }
+            else
+            {
+                //Debug.LogWarning($"[{gameObject.name}] Colidiu com {playerCol.name} na playerLayer, mas não encontrou PlayerHealth.");
             }
         }
     }
 
     void FireProjectile()
     {
-        if (projectilePrefab == null || projectileSpawnPoint == null || playerTarget == null)
-        {
-            Debug.LogWarning($"[{gameObject.name}] EnemyAttack: Faltam referências para FireProjectile (prefab, spawn ou target).");
-            return;
-        }
-        Debug.Log($"[{gameObject.name}] EnemyAttack: Disparando projétil.");
-        GameObject projectile = Instantiate(projectilePrefab, projectileSpawnPoint.position, projectileSpawnPoint.rotation);
-        // O projétil precisa de um script para se mover e causar dano na colisão.
-        // Exemplo simples de direcionamento:
-        Rigidbody rb = projectile.GetComponent<Rigidbody>();
-        if (rb != null)
-        {
-            Vector3 direction = (playerTarget.position + Vector3.up * 0.5f - projectileSpawnPoint.position).normalized; // Mira um pouco acima da base do player
-            projectile.transform.rotation = Quaternion.LookRotation(direction); // Orienta o projétil
-            rb.linearVelocity = direction * projectileSpeed;
-        }
-        // Adicione um script ao projétil para lidar com colisão e dano.
-    }
+        if (projectilePrefab == null || projectileSpawnPoint == null || playerTarget == null) return;
 
-    void FireRaycast()
-    {
-        if (playerTarget == null || attackOriginPoint == null) return;
-        Debug.Log($"[{gameObject.name}] EnemyAttack: Disparando Raycast.");
-        RaycastHit hit;
-        Vector3 direction = (playerTarget.position + Vector3.up * 0.5f - attackOriginPoint.position).normalized;
-        if (Physics.Raycast(attackOriginPoint.position, direction, out hit, attackRange * 1.5f, playerLayer)) // Aumenta um pouco o range do raycast
+        GameObject projectileInstance = Instantiate(projectilePrefab, projectileSpawnPoint.position, projectileSpawnPoint.rotation);
+        EnemyProjectile projectileScript = projectileInstance.GetComponent<EnemyProjectile>(); // Assumindo que o projétil tem esse script
+
+        if (projectileScript != null)
         {
-            if (hit.transform == playerTarget)
+            projectileScript.Initialize(playerTarget, projectileSpeed, attackDamage, playerLayer); // Passa o dano e a layer do jogador
+        }
+        else
+        {
+            // Fallback se não houver script EnemyProjectile (movimento simples)
+            Rigidbody rb = projectileInstance.GetComponent<Rigidbody>();
+            if (rb != null)
             {
-                PlayerHealth playerHealth = hit.transform.GetComponent<PlayerHealth>();
-                if (playerHealth != null)
-                {
-                    Debug.Log($"[{gameObject.name}] EnemyAttack: Acertou {playerTarget.name} com RAYCAST causando {attackDamage} de dano.");
-                    playerHealth.TakeDamage(attackDamage);
-                }
+                Vector3 direction = (playerTarget.position + Vector3.up * 0.5f - projectileSpawnPoint.position).normalized;
+                projectileInstance.transform.rotation = Quaternion.LookRotation(direction);
+                rb.linearVelocity = direction * projectileSpeed;
             }
+            // O projétil precisaria de um script para detectar colisão com o player e aplicar dano
+            // Ex: OnCollisionEnter, verifica se colidiu com playerLayer, pega PlayerHealth e aplica attackDamage.
+            // E se autodestruir.
+            Debug.LogWarning($"[{gameObject.name}] Projétil {projectileInstance.name} não tem script EnemyProjectile. Movimento básico aplicado. Dano e destruição precisam ser implementados no projétil.");
+            Destroy(projectileInstance, 5f); // Autodestrói após 5s como fallback
         }
-    }
-
-    void ThrowObject()
-    {
-        if (throwablePrefab == null || throwSpawnPoint == null || playerTarget == null)
-        {
-            Debug.LogWarning($"[{gameObject.name}] EnemyAttack: Faltam referências para ThrowObject (prefab, spawn ou target).");
-            return;
-        }
-        Debug.Log($"[{gameObject.name}] EnemyAttack: Arremessando objeto.");
-        GameObject throwable = Instantiate(throwablePrefab, throwSpawnPoint.position, throwSpawnPoint.rotation);
-        Rigidbody rb = throwable.GetComponent<Rigidbody>();
-        if (rb != null)
-        {
-            // Lógica para calcular trajetória de arremesso (mais complexa)
-            // Exemplo simples: apenas força na direção do player
-            Vector3 direction = (playerTarget.position - throwSpawnPoint.position).normalized;
-            // Adicionar um pouco de força para cima para um arco
-            direction = (direction + Vector3.up * 0.5f).normalized; // Ajuste o 0.5f para o arco desejado
-            rb.AddForce(direction * throwForce, ForceMode.VelocityChange);
-        }
-        // O objeto arremessado (granada, magia) precisará de seu próprio script para explodir/causar dano.
-    }
-
-
-    // --- Funções Auxiliares para Animação (Ajuste conforme necessário) ---
-    float GetActionPointDelayForAttack()
-    {
-        // Retorna o tempo em segundos DENTRO da animação de ataque onde o "acerto" acontece.
-        // Idealmente, isso viria de dados da animação ou Animation Events.
-        // Exemplo: se a animação dura 1s e o acerto é na metade, retorna 0.5s.
-        // Precisa ser específico para a animação de ataque atual se você tiver várias.
-        // Por enquanto, um valor fixo ou baseado na duração total.
-        return GetCurrentAttackAnimationLength() * 0.4f; // Ex: acerto em 40% da animação
     }
 
     float GetCurrentAttackAnimationLength()
     {
-        if (characterAnimator == null) return 1f; // Fallback
-
-        // Esta é uma forma de obter a duração do clipe ATUALMENTE TOCANDO na camada 0.
-        // Pode não ser 100% preciso se você tiver transições longas ou estados complexos.
-        AnimatorClipInfo[] clipInfo = characterAnimator.GetCurrentAnimatorClipInfo(0);
+        if (characterAnimator == null) return 0f;
+        AnimatorClipInfo[] clipInfo = characterAnimator.GetCurrentAnimatorClipInfo(0); // Camada 0
         if (clipInfo.Length > 0)
         {
-            // Se você tem triggers de ataque diferentes por tipo, pode checar o nome do estado aqui
-            // para retornar durações específicas.
-            // Ex: if (characterAnimator.GetCurrentAnimatorStateInfo(0).IsName("MeleeAttackState")) return 1.2f;
+            // Assume que o primeiro clipe é o de ataque se estivermos em um estado de ataque.
+            // Isso pode precisar de mais lógica se você tiver blend trees complexas.
             return clipInfo[0].clip.length;
         }
-        return 1f; // Fallback
+        return 0f; // Fallback
+    }
+
+    public void ResetIsAttackingFlag()
+    {
+        isCurrentlyAttacking = false;
+        // Debug.Log($"[{gameObject.name}] Attack SMB: isCurrentlyAttacking set to false.");
     }
 
     public bool IsCurrentlyAttacking()
     {
         return isCurrentlyAttacking;
     }
+
+    // Idealmente, usar um Animation State Machine Behaviour para resetar isCurrentlyAttacking
+    // ao sair do estado de ataque no Animator.
+    // Exemplo (adicionar este script a cada estado de ataque no Animator do inimigo):
+    /*
+    public class EnemyAttackSMB : StateMachineBehaviour
+    {
+        EnemyAttack attackScript;
+        override public void OnStateEnter(Animator animator, AnimatorStateInfo stateInfo, int layerIndex)
+        {
+            if (attackScript == null) attackScript = animator.GetComponentInParent<EnemyAttack>();
+            // attackScript?.SetIsAttacking(true); // Se precisar setar no Enter
+        }
+
+        override public void OnStateExit(Animator animator, AnimatorStateInfo stateInfo, int layerIndex)
+        {
+            if (attackScript == null) attackScript = animator.GetComponentInParent<EnemyAttack>();
+            attackScript?.ResetIsAttackingFlag(); // Método público em EnemyAttack
+        }
+    }
+    // Em EnemyAttack.cs:
+    // public void ResetIsAttackingFlag() { isCurrentlyAttacking = false; }
+    */
 }
