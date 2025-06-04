@@ -59,7 +59,7 @@ AnimatorStateTransition:
   m_TransitionOffset: 0
   m_ExitTime: 0.9
   m_HasExitTime: 1
-  m_HasFixedDuration: 1
+  m_HasFixedDuration: 0
   m_InterruptionSource: 0
   m_OrderedInterruption: 1
   m_CanTransitionToSelf: 1
@@ -483,7 +483,7 @@ AnimatorStateTransition:
   m_TransitionOffset: 0
   m_ExitTime: 0.9
   m_HasExitTime: 1
-  m_HasFixedDuration: 1
+  m_HasFixedDuration: 0
   m_InterruptionSource: 0
   m_OrderedInterruption: 1
   m_CanTransitionToSelf: 1
@@ -532,7 +532,7 @@ AnimatorState:
   m_MirrorParameterActive: 0
   m_CycleOffsetParameterActive: 0
   m_TimeParameterActive: 0
-  m_Motion: {fileID: -203655887218126122, guid: 6cb24f5d30db2264c80086dc3afe4bd1, type: 3}
+  m_Motion: {fileID: -203655887218126122, guid: b0be2d5ceb13b584e9c4d46b28a9c5df, type: 3}
   m_Tag: Attack
   m_SpeedParameter: 
   m_MirrorParameter: 
@@ -955,7 +955,7 @@ AnimatorStateMachine:
     m_Position: {x: 310, y: 70, z: 0}
   - serializedVersion: 1
     m_State: {fileID: 3565815756238795643}
-    m_Position: {x: 1170, y: -180, z: 0}
+    m_Position: {x: 1060, y: 10, z: 0}
   - serializedVersion: 1
     m_State: {fileID: 8647484353742172668}
     m_Position: {x: -10, y: -90, z: 0}

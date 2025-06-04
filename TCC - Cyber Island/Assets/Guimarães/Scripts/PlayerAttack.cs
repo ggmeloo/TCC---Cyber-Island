@@ -189,7 +189,7 @@ public class PlayerAttack : MonoBehaviour
         if (characterAnimator.GetCurrentAnimatorStateInfo(0).IsTag(ATTACK_STATE_TAG) &&
             (equippedWeaponAnimType == WeaponAnimType.Unarmed || equippedWeaponAnimType == WeaponAnimType.Melee))
         {
-            //Debug.Log("HitDetectionCoroutine: Chamando PerformHitDetection.");
+            Debug.Log("HitDetectionCoroutine: Chamando PerformHitDetection.");
             PerformHitDetection();
         }
         activeHitDetectionCoroutine = null;
@@ -242,11 +242,9 @@ public class PlayerAttack : MonoBehaviour
 
         foreach (Collider hitEnemyCollider in hitColliders)
         {
-            //Debug.Log($"Inimigo detectado: {hitEnemyCollider.name} com {equippedWeaponAnimType}");
+           // Debug.Log($"Inimigo detectado: {hitEnemyCollider.name} com {equippedWeaponAnimType}");
             ApplyDamageToEnemy(hitEnemyCollider.gameObject, currentBaseDamage);
         }
-
-
     }
 
     void ApplyDamageToEnemy(GameObject hitEnemyObject, int baseDamageToApply)
