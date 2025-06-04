@@ -1,30 +1,49 @@
-// PlayerHealth.cs
 using UnityEngine;
+using UnityEngine.UI;
 using System.Collections;
-// using UnityEngine.UI; // Para futuras barras de vida na UI
+using UnityEngine.SceneManagement;
 
 public class PlayerHealth : MonoBehaviour
 {
     [Header("Configurações de Vida")]
     public int maxHealth = 100;
-    [SerializeField] private int currentHealth; // Para ver no Inspector
-    public bool isInvincible = false; // Para adicionar iframes se desejar
+    [SerializeField] private int currentHealth;
+    public bool isInvincible = false;
+    public float invincibilityDuration = 1f;
 
-    // --- Para UI de Barra de Vida (Exemplo Futuro) ---
-    // public Image healthBarFill;
-    // -------------------------------------------------
+    [Header("Configurações de UI")]
+    public Slider healthSlider;
+    public Image healthFill;
+    public Gradient healthGradient;
+    public Text healthText;
+    public Image damageEffect;
 
-    // --- Para Efeitos de Morte/Game Over (Exemplo Futuro) ---
-    // public GameObject deathEffectPrefab;
-    // public float delayBeforeRestart = 3f;
-    // -------------------------------------------------------
-
+    [Header("Configurações de Morte")]
+    public GameObject deathEffectPrefab;
+    public float delayBeforeRestart = 3f;
+    public string gameOverSceneName = "GameOver";
 
     void Awake()
     {
         currentHealth = maxHealth;
+        InitializeHealthUI();
         Debug.Log($"[{gameObject.name}] PlayerHealth: Vida inicializada em {currentHealth}");
-        UpdateHealthUI(); // Chame se você já tiver uma UI
+    }
+
+    void InitializeHealthUI()
+    {
+        if (healthSlider != null)
+        {
+            healthSlider.maxValue = maxHealth;
+            healthSlider.value = currentHealth;
+        }
+
+        if (healthFill != null && healthGradient != null)
+        {
+            healthFill.color = healthGradient.Evaluate(1f);
+        }
+
+        UpdateHealthText();
     }
 
     public int GetCurrentHealth()
@@ -34,93 +53,158 @@ public class PlayerHealth : MonoBehaviour
 
     public void TakeDamage(int damageAmount)
     {
-        if (isInvincible)
-        {
-            Debug.Log($"[{gameObject.name}] PlayerHealth: Dano de {damageAmount} ignorado (invencível).");
-            return;
-        }
-        if (currentHealth <= 0) // Já morto
-        {
-            return;
-        }
+        if (isInvincible || currentHealth <= 0) return;
 
-        currentHealth -= damageAmount;
+        currentHealth = Mathf.Max(0, currentHealth - damageAmount);
         Debug.Log($"[{gameObject.name}] PlayerHealth: Tomou {damageAmount} de dano. Vida restante: {currentHealth}");
 
-        if (currentHealth < 0)
+        UpdateHealthUI();
+
+        if (damageEffect != null)
         {
-            currentHealth = 0;
+            StartCoroutine(FlashDamageEffect());
         }
-
-        UpdateHealthUI(); // Atualiza a barra de vida
-
-        // Você pode adicionar um feedback de dano aqui (som, piscar o sprite/modelo)
-        // GetComponent<Animator>().SetTrigger("Hit"); // Se o player tiver animação de tomar dano
 
         if (currentHealth == 0)
         {
             Die();
         }
+        else
+        {
+            StartCoroutine(InvincibilityCoroutine(invincibilityDuration));
+        }
     }
 
     public void Heal(int healAmount)
     {
-        if (currentHealth <= 0) return; // Não pode curar se morto
+        if (currentHealth <= 0) return;
 
-        currentHealth += healAmount;
-        if (currentHealth > maxHealth)
-        {
-            currentHealth = maxHealth;
-        }
+        currentHealth = Mathf.Min(maxHealth, currentHealth + healAmount);
         Debug.Log($"[{gameObject.name}] PlayerHealth: Curou {healAmount}. Vida atual: {currentHealth}");
+
         UpdateHealthUI();
     }
-
 
     void Die()
     {
         Debug.Log($"[{gameObject.name}] PlayerHealth: MORREU!");
-        // Lógica de Game Over:
-        // - Tocar animação de morte do player
-        // - Mostrar tela de Game Over
-        // - Parar o jogo / Recarregar a cena
-        // GetComponent<Animator>().SetBool("IsDead", true);
-        // Time.timeScale = 0f; // Pausa o jogo (simples)
-        // Invoke("RestartLevel", delayBeforeRestart); // Exemplo
-        gameObject.SetActive(false); // Exemplo simples de "morte"
-    }
 
-    void RestartLevel()
-    {
-        Time.timeScale = 1f;
-        // UnityEngine.SceneManagement.SceneManager.LoadScene(UnityEngine.SceneManagement.SceneManager.GetActiveScene().name);
-        Debug.Log("REINICIANDO NÍVEL (Implementar)");
+        if (deathEffectPrefab != null)
+        {
+            Instantiate(deathEffectPrefab, transform.position, Quaternion.identity);
+        }
+
+        if (TryGetComponent(out Animator animator))
+        {
+            animator.SetBool("IsDead", true);
+        }
+
+        if (TryGetComponent(out PlayerMovement movement))
+        {
+            movement.enabled = false;
+        }
+
+        if (TryGetComponent(out Collider2D collider))
+        {
+            collider.enabled = false;
+        }
+
+        if (!string.IsNullOrEmpty(gameOverSceneName))
+        {
+            Invoke("LoadGameOverScene", delayBeforeRestart);
+        }
+        else
+        {
+            gameObject.SetActive(false);
+        }
     }
 
     void UpdateHealthUI()
     {
-        // Se você tiver uma barra de vida na UI:
-        // if (healthBarFill != null)
-        // {
-        //     healthBarFill.fillAmount = (float)currentHealth / maxHealth;
-        // }
-        // Debug.Log($"[{gameObject.name}] PlayerHealth: UI de vida atualizada (Vida: {currentHealth})");
+        if (healthSlider != null)
+        {
+            healthSlider.value = currentHealth;
+        }
+
+        if (healthFill != null && healthGradient != null)
+        {
+            float healthPercentage = (float)currentHealth / maxHealth;
+            healthFill.color = healthGradient.Evaluate(healthPercentage);
+        }
+
+        UpdateHealthText();
     }
 
-    // Exemplo de como o player poderia se tornar invencível por um tempo após tomar dano
-    public void StartInvincibility(float duration)
+    void UpdateHealthText()
     {
-        StartCoroutine(InvincibilityCoroutine(duration));
+        if (healthText != null)
+        {
+            healthText.text = $"{currentHealth}/{maxHealth}";
+        }
+    }
+
+    IEnumerator FlashDamageEffect()
+    {
+        if (damageEffect != null)
+        {
+            damageEffect.enabled = true;
+            yield return new WaitForSeconds(0.1f);
+            damageEffect.enabled = false;
+        }
     }
 
     IEnumerator InvincibilityCoroutine(float duration)
     {
         isInvincible = true;
-        // Debug.Log("Player Invencível por " + duration + "s");
-        // Adicionar feedback visual de invencibilidade (piscar sprite, etc.)
-        yield return new WaitForSeconds(duration);
+
+        // Efeito de piscar durante a invencibilidade
+        if (TryGetComponent(out SpriteRenderer spriteRenderer))
+        {
+            float elapsedTime = 0f;
+            float blinkSpeed = 0.1f;
+
+            while (elapsedTime < duration)
+            {
+                spriteRenderer.enabled = !spriteRenderer.enabled;
+                yield return new WaitForSeconds(blinkSpeed);
+                elapsedTime += blinkSpeed;
+            }
+
+            spriteRenderer.enabled = true;
+        }
+        else
+        {
+            yield return new WaitForSeconds(duration);
+        }
+
         isInvincible = false;
-        // Debug.Log("Player não está mais invencível");
-        // Remover feedback visual
+    }
+
+    void LoadGameOverScene()
+    {
+        Time.timeScale = 1f;
+        SceneManager.LoadScene(gameOverSceneName);
+    }
+
+    // Método para resetar a vida (útil quando reinicia o nível)
+    public void ResetHealth()
+    {
+        currentHealth = maxHealth;
+        UpdateHealthUI();
+
+        if (TryGetComponent(out Animator animator))
+        {
+            animator.SetBool("IsDead", false);
+        }
+
+        if (TryGetComponent(out PlayerMovement movement))
+        {
+            movement.enabled = true;
+        }
+
+        if (TryGetComponent(out Collider2D collider))
+        {
+            collider.enabled = true;
+        }
     }
 }
