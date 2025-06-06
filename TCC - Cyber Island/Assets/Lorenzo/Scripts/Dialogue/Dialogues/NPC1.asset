@@ -21,21 +21,25 @@ MonoBehaviour:
   - speakerName: "Capit\xE3o da Vila"
     sentence: "Tesouro, \xE9? Hah! Cada rato do mar que chega aqui fala de mapas
       m\xE1gicos e ouro encantado. E o que tu tem pra me mostrar?"
-    speakerSprite: {fileID: 21300000, guid: 068902e5b9f6d4c49a0f9dbf8bcc7be3, type: 3}
+    speakerSprite: {fileID: -1942475816, guid: 8e26768df4734564caa486c6a9031ab5, type: 3}
   - speakerName: "Mercen\xE1rio"
     sentence: Tenho um mapa. Ou o que restou dele.
     speakerSprite: {fileID: 21300000, guid: 068902e5b9f6d4c49a0f9dbf8bcc7be3, type: 3}
   - speakerName: "Capit\xE3o da Vila"
     sentence: Mostra.
-    speakerSprite: {fileID: 21300000, guid: 068902e5b9f6d4c49a0f9dbf8bcc7be3, type: 3}
+    speakerSprite: {fileID: -1942475816, guid: 8e26768df4734564caa486c6a9031ab5, type: 3}
   - speakerName: "Capit\xE3o da Vila"
     sentence: "Ora, ora... Isso aqui n\xE3o \xE9 conversa de b\xEAbado. Eu j\xE1
       vi esse s\xEDmbolo... no velho acampamento dos Irm\xE3os das Profundezas."
-    speakerSprite: {fileID: 21300000, guid: 068902e5b9f6d4c49a0f9dbf8bcc7be3, type: 3}
+    speakerSprite: {fileID: -1942475816, guid: 8e26768df4734564caa486c6a9031ab5, type: 3}
   - speakerName: "Mercen\xE1rio"
     sentence: E onde fica esse acampamento?
     speakerSprite: {fileID: 21300000, guid: 068902e5b9f6d4c49a0f9dbf8bcc7be3, type: 3}
   - speakerName: "Capit\xE3o da Vila"
     sentence: "Ao norte da ilha, no Vale das Serpentes. Mas cuidado\u2026 dizem que
       quem tenta roubar os segredos dos Irm\xE3os acaba alimentando os peixes..."
-    speakerSprite: {fileID: 21300000, guid: 3d42b5ef33689af43a3e6dccb8b02805, type: 3}
+    speakerSprite: {fileID: -1942475816, guid: 8e26768df4734564caa486c6a9031ab5, type: 3}
+  - speakerName: "Capit\xE3o da Vila"
+    sentence: "Pegue a espada a sua esquerda e v\xE1 tomar o acampamento, assim que
+      voltar eu lhe darei mais informa\xE7\xF5es"
+    speakerSprite: {fileID: -1942475816, guid: 8e26768df4734564caa486c6a9031ab5, type: 3}
