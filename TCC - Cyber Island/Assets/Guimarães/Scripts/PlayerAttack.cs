@@ -1,5 +1,6 @@
 using UnityEngine;
 using System.Collections;
+using UnityEngine.EventSystems; // <<< MUDANÇA 1: Adicionado o namespace necessário
 
 public class PlayerAttack : MonoBehaviour
 {
@@ -23,15 +24,14 @@ public class PlayerAttack : MonoBehaviour
     private const string ATTACK_STATE_TAG = "Attack";
 
     [Header("Configurações de Ataque Desarmado (Punch)")]
-    public Transform unarmedAttackPoint; // Ponto para socos
+    public Transform unarmedAttackPoint;
     public float unarmedAttackRadius = 0.3f;
     public int unarmedBaseDamage = 15;
 
     [Header("Configurações de Ataque com Arma Melee")]
-    public Transform meleeWeaponAttackPoint; // Será definido pelo PlayerPickup ou manualmente
+    public Transform meleeWeaponAttackPoint;
     public float meleeWeaponAttackRadius = 0.6f;
     public int meleeWeaponBaseDamage = 30;
-    // Nota: meleeWeaponAttackPoint pode ser null se nenhuma arma melee estiver equipada ou se ela não tiver um "WeaponDamagePoint"
 
     [Header("Configurações Críticas (Compartilhadas)")]
     public float criticalHitChance = 0.2f;
@@ -41,6 +41,12 @@ public class PlayerAttack : MonoBehaviour
     [Tooltip("Percentual da duração da animação para aplicar dano (0.0 a 1.0).")]
     public float damageApplicationPointNormalized = 0.5f;
     private Coroutine activeHitDetectionCoroutine;
+    private CapsuleCollider capsuleCollider;
+
+    void Awake()
+    {
+        capsuleCollider = GetComponent<CapsuleCollider>();
+    }
 
     void Start()
     {
@@ -58,27 +64,17 @@ public class PlayerAttack : MonoBehaviour
             if (characterAnimator == null) { Debug.LogError("PLAYER ATTACK: Animator não encontrado!", this.gameObject); this.enabled = false; return; }
         }
 
-        // Garante que o unarmedAttackPoint tenha um valor padrão se não for definido no inspector
         if (unarmedAttackPoint == null)
         {
-            // Cria um ponto padrão filho do jogador para unarmed
             GameObject defaultUnarmedPoint = new GameObject("DefaultUnarmedAttackPoint");
             defaultUnarmedPoint.transform.SetParent(transform);
-            defaultUnarmedPoint.transform.localPosition = new Vector3(0, capsuleCollider != null ? capsuleCollider.height / 2 : 1f, capsuleCollider != null ? capsuleCollider.radius + 0.3f : 0.5f); // Ajuste conforme necessário
+            defaultUnarmedPoint.transform.localPosition = new Vector3(0, capsuleCollider != null ? capsuleCollider.height / 2 : 1f, capsuleCollider != null ? capsuleCollider.radius + 0.3f : 0.5f);
             unarmedAttackPoint = defaultUnarmedPoint.transform;
             Debug.LogWarning("PLAYER ATTACK: UnarmedAttackPoint não atribuído. Criando um padrão. Por favor, ajuste sua posição.");
         }
-        // meleeWeaponAttackPoint é intencionalmente deixado para ser definido por PlayerPickup ou manualmente,
-        // pois depende da arma.
 
         if (targetLockScript == null) targetLockScript = GetComponent<PlayerTargetLock>();
     }
-    private CapsuleCollider capsuleCollider; // Adicionado para o ponto padrão
-    void Awake() // Usar Awake para pegar o CapsuleCollider antes do Start
-    {
-        capsuleCollider = GetComponent<CapsuleCollider>();
-    }
-
 
     void Update()
     {
@@ -90,7 +86,7 @@ public class PlayerAttack : MonoBehaviour
         if (playerMovementScript != null)
         {
             if (isAnimatorInAttackState && !wasPreviouslyInAttackState)
-                playerMovementScript.SetCanMove(false); 
+                playerMovementScript.SetCanMove(false);
             else if (!isAnimatorInAttackState && wasPreviouslyInAttackState)
                 playerMovementScript.SetCanMove(true);
         }
@@ -104,10 +100,20 @@ public class PlayerAttack : MonoBehaviour
         if (currentComboStep > 0 && !isAnimatorInAttackState && Time.time > lastSuccessfulAttackInputTime + comboResetTime)
             ResetCombo();
 
+        // <<< MUDANÇA 2: Adicionada a verificação da UI
+        // Se o cursor do mouse estiver sobre um elemento de UI (como o inventário),
+        // não processe o input de ataque.
+        if (EventSystem.current.IsPointerOverGameObject())
+        {
+            // Opcional: Se quiser que um clique na UI cancele o buffer de ataque, descomente a linha abaixo
+            // attackBuffered = false; 
+            return; // Impede que o código de ataque abaixo seja executado.
+        }
+
         if (Input.GetMouseButtonDown(0))
         {
             bool canCurrentlyMove = (playerMovementScript != null) ? playerMovementScript.CanMove : true;
-            if (canCurrentlyMove || isAnimatorInAttackState) // Permite buffer se puder mover OU já estiver atacando
+            if (canCurrentlyMove || isAnimatorInAttackState)
             {
                 attackBuffered = true;
             }
@@ -118,27 +124,25 @@ public class PlayerAttack : MonoBehaviour
             bool attackProcessedThisFrame = false;
             if (equippedWeaponAnimType == WeaponAnimType.Unarmed || equippedWeaponAnimType == WeaponAnimType.Melee)
             {
-                // Condição para iniciar ou continuar combo
-                if (!isAnimatorInAttackState || currentComboStep == 0) // Iniciar novo combo
+                if (!isAnimatorInAttackState || currentComboStep == 0)
                 {
                     currentComboStep = 1;
                     ProcessAttackParametersForAnimator(true);
                     attackProcessedThisFrame = true;
                 }
-                else if (isAnimatorInAttackState && currentComboStep < maxComboSteps) // Continuar combo
+                else if (isAnimatorInAttackState && currentComboStep < maxComboSteps)
                 {
                     currentComboStep++;
                     ProcessAttackParametersForAnimator(true);
                     attackProcessedThisFrame = true;
                 }
-                else if (isAnimatorInAttackState && currentComboStep == maxComboSteps) // Reiniciar combo se clicou no último passo
+                else if (isAnimatorInAttackState && currentComboStep == maxComboSteps)
                 {
                     currentComboStep = 1;
                     ProcessAttackParametersForAnimator(true);
                     attackProcessedThisFrame = true;
                 }
             }
-            // (Lógica para Ranged omitida por foco, mas seria aqui)
 
             if (attackProcessedThisFrame)
             {
@@ -147,12 +151,12 @@ public class PlayerAttack : MonoBehaviour
             }
         }
 
+        // Seus botões de debug
         if (Input.GetKeyDown(KeyCode.Alpha1)) EquipWeapon(WeaponAnimType.Unarmed, null);
-        // Para Alpha2 (Melee), o PlayerPickup.cs cuidaria de chamar EquipWeapon com o ponto da arma.
-        // Se você quiser um botão de debug para equipar uma "arma melee padrão" sem pegar:
-        // if (Input.GetKeyDown(KeyCode.Alpha2)) EquipWeapon(WeaponAnimType.Melee, algumaReferenciaTransformParaUmaArmaMeleeDebug);
     }
 
+    // O resto do seu código permanece exatamente o mesmo, não precisa mudar mais nada.
+    // ... (ProcessAttackParametersForAnimator, HitDetectionCoroutine, etc.)
     void ProcessAttackParametersForAnimator(bool shouldAttemptHitDetection)
     {
         if (characterAnimator == null) return;
@@ -170,7 +174,7 @@ public class PlayerAttack : MonoBehaviour
 
     IEnumerator HitDetectionCoroutine()
     {
-        yield return null; yield return null; // Espera Animator atualizar
+        yield return null; yield return null;
 
         if (!characterAnimator.GetCurrentAnimatorStateInfo(0).IsTag(ATTACK_STATE_TAG))
         {
@@ -182,14 +186,11 @@ public class PlayerAttack : MonoBehaviour
         float animationLength = stateInfo.length;
         float waitTime = animationLength * damageApplicationPointNormalized;
 
-        //Debug.Log($"HitDetectionCoroutine para {equippedWeaponAnimType}: Esperando {waitTime:F2}s para hit.");
-
         if (waitTime > 0.01f) yield return new WaitForSeconds(waitTime);
 
         if (characterAnimator.GetCurrentAnimatorStateInfo(0).IsTag(ATTACK_STATE_TAG) &&
             (equippedWeaponAnimType == WeaponAnimType.Unarmed || equippedWeaponAnimType == WeaponAnimType.Melee))
         {
-            Debug.Log("HitDetectionCoroutine: Chamando PerformHitDetection.");
             PerformHitDetection();
         }
         activeHitDetectionCoroutine = null;
@@ -209,40 +210,29 @@ public class PlayerAttack : MonoBehaviour
         }
         else if (equippedWeaponAnimType == WeaponAnimType.Melee)
         {
-            // Se meleeWeaponAttackPoint (da arma) não foi definido, tenta usar o unarmedAttackPoint como fallback
-            // ou um ponto filho específico do jogador para melee, se você criar um.
-            // Idealmente, meleeWeaponAttackPoint é definido pela arma.
-            currentAttackPoint = meleeWeaponAttackPoint != null ? meleeWeaponAttackPoint : unarmedAttackPoint; // Fallback para unarmed se weapon point for null
+            currentAttackPoint = meleeWeaponAttackPoint != null ? meleeWeaponAttackPoint : unarmedAttackPoint;
             currentAttackRadius = meleeWeaponAttackRadius;
             currentBaseDamage = meleeWeaponBaseDamage;
 
             if (meleeWeaponAttackPoint == null)
             {
-                Debug.LogWarning($"PLAYER ATTACK (Melee): meleeWeaponAttackPoint é null. Usando unarmedAttackPoint ({unarmedAttackPoint.name}) como fallback. Certifique-se de que a arma melee tem 'WeaponDamagePoint' ou defina meleeWeaponAttackPoint manualmente.");
+                Debug.LogWarning($"PLAYER ATTACK (Melee): meleeWeaponAttackPoint é null. Usando unarmedAttackPoint ({unarmedAttackPoint.name}) como fallback.");
             }
         }
-        else // Ranged ou outros tipos
+        else
         {
             return;
         }
 
         if (currentAttackPoint == null)
         {
-            Debug.LogError($"PLAYER ATTACK: currentAttackPoint é NULL para {equippedWeaponAnimType}. Dano não será aplicado.");
+            Debug.LogError($"PLAYER ATTACK: currentAttackPoint é NULL para {equippedWeaponAnimType}.");
             return;
         }
 
-        //Debug.Log($"PerformHitDetection para {equippedWeaponAnimType}. Ponto: {currentAttackPoint.name} ({currentAttackPoint.position}), Raio: {currentAttackRadius}");
-
         Collider[] hitColliders = Physics.OverlapSphere(currentAttackPoint.position, currentAttackRadius, enemyLayer);
-        if (hitColliders.Length == 0 && (equippedWeaponAnimType == WeaponAnimType.Melee || equippedWeaponAnimType == WeaponAnimType.Unarmed))
-        {
-            //Debug.Log($"Nenhum inimigo detectado no OverlapSphere para {equippedWeaponAnimType}.");
-        }
-
         foreach (Collider hitEnemyCollider in hitColliders)
         {
-           // Debug.Log($"Inimigo detectado: {hitEnemyCollider.name} com {equippedWeaponAnimType}");
             ApplyDamageToEnemy(hitEnemyCollider.gameObject, currentBaseDamage);
         }
     }
@@ -255,47 +245,27 @@ public class PlayerAttack : MonoBehaviour
         {
             bool isCritical = Random.value < criticalHitChance;
             int damageToDeal = baseDamageToApply;
-            if (isCritical) damageToDeal = Mathf.RoundToInt(damageToDeal * criticalDamageMultiplier); // Arredonda para inteiro
-            //Debug.Log($"PLAYER: Dano de {damageToDeal} (Base: {baseDamageToApply}, Crítico: {isCritical}) em {hitEnemyObject.name}.");
+            if (isCritical) damageToDeal = Mathf.RoundToInt(damageToDeal * criticalDamageMultiplier);
             enemyAI.TakeDamage(damageToDeal, isCritical);
         }
     }
 
-    // Método público para PlayerPickup definir o ponto de ataque da arma melee
     public void SetMeleeWeaponAttackPoint(Transform weaponPoint)
     {
         meleeWeaponAttackPoint = weaponPoint;
-        if (weaponPoint != null)
-        {
-            //Debug.Log($"PlayerAttack: meleeWeaponAttackPoint definido para {weaponPoint.name}");
-        }
-        else
-        {
-            //Debug.Log("PlayerAttack: meleeWeaponAttackPoint limpo (null).");
-        }
     }
-
 
     public void EquipWeapon(WeaponAnimType type, Transform specificWeaponDamagePoint)
     {
         equippedWeaponAnimType = type;
-        ResetCombo(); // Sempre reseta combo ao trocar de equipamento/tipo
-        //Debug.Log($"Arma equipada: {type}");
+        ResetCombo();
 
         if (type == WeaponAnimType.Melee)
         {
             SetMeleeWeaponAttackPoint(specificWeaponDamagePoint);
-            // Se specificWeaponDamagePoint for null, PlayerAttack usará seu unarmedAttackPoint como fallback
-            // ou você pode definir um meleeWeaponAttackPoint padrão no Inspector do PlayerAttack.
-            if (specificWeaponDamagePoint == null && meleeWeaponAttackPoint == null)
-            {
-                //Debug.LogWarning("EquipWeapon (Melee): Nenhum specificWeaponDamagePoint fornecido e o meleeWeaponAttackPoint padrão também é nulo. O ataque melee pode não funcionar corretamente.");
-            }
         }
         else
         {
-            // Para Unarmed ou Ranged, não precisamos do specificWeaponDamagePoint dessa forma,
-            // então podemos limpar o meleeWeaponAttackPoint para evitar confusão.
             SetMeleeWeaponAttackPoint(null);
         }
     }
@@ -315,16 +285,12 @@ public class PlayerAttack : MonoBehaviour
 
     void OnDrawGizmosSelected()
     {
-        // Gizmo para Ataque Desarmado
-        if (unarmedAttackPoint != null && equippedWeaponAnimType == WeaponAnimType.Unarmed) // Mostra apenas se unarmed estiver ativo
+        if (unarmedAttackPoint != null && equippedWeaponAnimType == WeaponAnimType.Unarmed)
         {
             Gizmos.color = Color.cyan;
             Gizmos.DrawWireSphere(unarmedAttackPoint.position, unarmedAttackRadius);
         }
 
-        // Gizmo para Ataque com Arma Melee
-        // Mostra o gizmo do meleeWeaponAttackPoint se ele estiver definido E o tipo de arma for Melee.
-        // Se meleeWeaponAttackPoint for null, mas estivermos em Melee, mostra o gizmo do unarmedAttackPoint como fallback (para visualização).
         if (equippedWeaponAnimType == WeaponAnimType.Melee)
         {
             Gizmos.color = Color.red;
@@ -332,11 +298,10 @@ public class PlayerAttack : MonoBehaviour
             {
                 Gizmos.DrawWireSphere(meleeWeaponAttackPoint.position, meleeWeaponAttackRadius);
             }
-            else if (unarmedAttackPoint != null) // Visualiza o fallback se o ponto da arma não estiver definido
+            else if (unarmedAttackPoint != null)
             {
-                Gizmos.color = new Color(1f, 0.5f, 0.5f, 0.7f); // Um vermelho mais claro para indicar fallback
-                Gizmos.DrawWireSphere(unarmedAttackPoint.position, meleeWeaponAttackRadius); // Usa o raio do melee, mas ponto do unarmed
-                // Isso ajuda a ver onde o ataque "aconteceria" se o ponto da arma não estiver configurado.
+                Gizmos.color = new Color(1f, 0.5f, 0.5f, 0.7f);
+                Gizmos.DrawWireSphere(unarmedAttackPoint.position, meleeWeaponAttackRadius);
             }
         }
     }

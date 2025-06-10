@@ -5,9 +5,21 @@ EditorBuildSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 2
   m_Scenes:
-  - enabled: 1
-    path: Assets/Scenes/SampleScene.unity
+  - enabled: 0
+    path: Assets/Diego/Interface - CyberSland/Assets/Scenes/Cena de Diego.unity
     guid: 99c9720ab356a0642a771bea13969a05
+  - enabled: 1
+    path: Assets/Diego/Tutorial/Scenes/inventario.unity
+    guid: 9aaf285aefecc204c8e9bd0ff28736b7
+  - enabled: 1
+    path: Assets/Diego/Tutorial/Scenes/Bau.unity
+    guid: 1af108725d021b941a247b85bb3379af
+  - enabled: 1
+    path: Assets/Diego/Tutorial/Scenes/menu.unity
+    guid: e99a8cd9313f2bc40a6c4abbe858eb90
+  - enabled: 1
+    path: Assets/Diego/Tutorial/Scenes/mundo.unity
+    guid: b84306e44113e7b4db9e7a34b86216c5
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   m_UseUCBPForAssetBundles: 0
