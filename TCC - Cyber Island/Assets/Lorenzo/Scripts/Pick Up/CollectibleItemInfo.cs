@@ -2,16 +2,19 @@ using UnityEngine;
 
 public class CollectibleItemInfo : MonoBehaviour
 {
-    [Header("Item Identification")] // Identificação do Item
-    public SpecificItemType itemIdentifier = SpecificItemType.None; // Use o novo enum
+    [Header("Item Identification")]
+    public SpecificItemType itemIdentifier = SpecificItemType.None;
 
-    [Header("For Equippable Items (Used by PlayerPickup)")] // Para Itens Equipáveis (Usado por PlayerPickup)
-    // Se verdadeiro, PlayerPickup irá gerenciá-lo com handPoint/standbyPoint.
-    // Se falso, ele tentará ir para um slot do PlayerInventoryDisplay.
+    [Header("For Equippable Items (Used by PlayerPickup)")]
     public bool isDirectlyEquippable = false;
-    public PlayerAttack.WeaponAnimType itemWeaponType = PlayerAttack.WeaponAnimType.Melee; // Relevante se isDirectlyEquippable for verdadeiro
+    public PlayerAttack.WeaponAnimType itemWeaponType = PlayerAttack.WeaponAnimType.Melee;
 
-    // Você pode adicionar outros dados específicos do item aqui, se necessário no futuro
-    // public int value;
-    // public string description;
+    [Header("Visuals for UI / Hotbar")]
+    public Sprite itemIcon = null;
+
+    [Header("World Representation")]
+    // Referência ao Prefab deste próprio item.
+    // Essencial para que o sistema de inventário saiba qual objeto 3D criar no mundo ao "dropar" o item.
+    // Arraste o prefab correspondente da sua pasta de Assets para este campo.
+    public GameObject itemPrefab;
 }
