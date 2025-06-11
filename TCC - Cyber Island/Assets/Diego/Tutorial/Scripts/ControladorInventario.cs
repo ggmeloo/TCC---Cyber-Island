@@ -3,10 +3,10 @@ using UnityEngine;
 public class ControladorInventario : MonoBehaviour
 {
     public GameObject painelInventario;
-    public ThirdPersonOrbitCamera scriptDaCamera;
 
-    // (Lembre-se: se você também quiser parar o movimento do personagem, precisará da referência dele aqui)
-    // public MovimentoJogador scriptDoJogador;
+    // <<< MUDANÇA 1: Referência à câmera foi REMOVIDA >>>
+    // Não precisamos mais falar diretamente com a câmera.
+    // public ThirdPersonOrbitCamera scriptDaCamera; 
 
     private bool inventarioAberto = false;
 
@@ -15,23 +15,23 @@ public class ControladorInventario : MonoBehaviour
         // Garante que o inventário comece fechado
         painelInventario.SetActive(false);
 
-        // Garante que a câmera comece podendo orbitar
-        if (scriptDaCamera != null) scriptDaCamera.podeOrbitarComMouse = true;
-
-        // Garante que o cursor comece travado e invisível
-        Cursor.lockState = CursorLockMode.Locked;
-        Cursor.visible = false;
+        // O EstadoJogador já cuida do estado inicial do cursor e da câmera,
+        // então não precisamos configurar nada aqui.
     }
 
     void Update()
     {
+        // Permite abrir/fechar o inventário com TAB, mas apenas se não estivermos já no modo de UI
+        // por outro motivo (como o baú aberto). Isso evita conflitos.
         if (Input.GetKeyDown(KeyCode.Tab))
         {
-            if (inventarioAberto)
+            // Se o inventário está aberto E o modo UI está ativo, então podemos fechá-lo.
+            if (inventarioAberto && EstadoJogador.instance.EmModoUI)
             {
                 FecharInventario();
             }
-            else
+            // Só podemos abrir se o modo UI ainda não estiver ativo.
+            else if (!EstadoJogador.instance.EmModoUI)
             {
                 AbrirInventario();
             }
@@ -42,39 +42,19 @@ public class ControladorInventario : MonoBehaviour
     {
         inventarioAberto = true;
         painelInventario.SetActive(true);
-        // Time.timeScale = 0f; // <<< LINHA REMOVIDA
 
-        // Libera e mostra o cursor para usar no inventário
-        Cursor.lockState = CursorLockMode.None;
-        Cursor.visible = true;
-
-        // Trava a rotação da câmera pelo mouse
-        if (scriptDaCamera != null)
-        {
-            scriptDaCamera.podeOrbitarComMouse = false;
-        }
-
-        // Se você quisesse parar o movimento do jogador, faria aqui:
-        // if(scriptDoJogador != null) scriptDoJogador.podeMover = false;
+        // <<< MUDANÇA 2: Usamos o EstadoJogador >>>
+        // Avisa ao sistema central para entrar no modo de UI (travar câmera, mostrar cursor, etc.)
+        EstadoJogador.instance.AtivarModoUI();
     }
 
     void FecharInventario()
     {
         inventarioAberto = false;
         painelInventario.SetActive(false);
-        // Time.timeScale = 1f; // <<< LINHA REMOVIDA
 
-        // Trava e esconde o cursor para voltar ao gameplay normal
-        Cursor.lockState = CursorLockMode.Locked;
-        Cursor.visible = false;
-
-        // Libera a rotação da câmera pelo mouse novamente
-        if (scriptDaCamera != null)
-        {
-            scriptDaCamera.podeOrbitarComMouse = true;
-        }
-
-        // Se você tivesse parado o movimento do jogador, liberaria aqui:
-        // if(scriptDoJogador != null) scriptDoJogador.podeMover = true;
+        // <<< MUDANÇA 3: Usamos o EstadoJogador >>>
+        // Avisa ao sistema central para sair do modo de UI e voltar ao jogo.
+        EstadoJogador.instance.DesativarModoUI();
     }
 }

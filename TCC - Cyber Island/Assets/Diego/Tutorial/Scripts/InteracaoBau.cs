@@ -2,108 +2,107 @@ using UnityEngine;
 
 public class InteracaoBau : MonoBehaviour
 {
-    [Header("Configurações da Interface")]
-    public GameObject painelBau;
-    public KeyCode teclaInteracao = KeyCode.E;
+    [Header("Referências da UI")]
+    public GameObject painelDeInteracaoUI;
+    public GameObject painelInventarioBau;
 
-    // <<< MUDANÇA: Renomeamos a variável para ser mais genérica. >>>
-    [Header("Prompt de Interação")]
-    public GameObject promptVisual;
+    [Header("Referências de Animação")]
+    public Animator animatorBau;
 
-    [Header("Controle do Jogador")]
-    public ThirdPersonOrbitCamera scriptDaCamera;
-
-    private Animator animator;
-    private bool jogadorPerto = false;
-    private bool bauAberto = false;
+    private bool jogadorEstaPerto = false;
+    private bool inventarioEstaAberto = false;
+    private const string PARAMETRO_ANIMACAO_ABERTO = "EstaAberto";
 
     void Start()
     {
-        animator = GetComponent<Animator>();
-        if (animator == null)
-        {
-            Debug.LogError("O objeto do Baú não tem um componente Animator!", this);
-        }
-
-        if (painelBau != null) painelBau.SetActive(false);
-
-        // Garante que o prompt visual comece desligado
-        if (promptVisual != null) promptVisual.SetActive(false);
+        if (painelDeInteracaoUI != null) painelDeInteracaoUI.SetActive(false);
+        if (painelInventarioBau != null) painelInventarioBau.SetActive(false);
+        AtualizarAnimacao();
     }
 
+    void Update()
+    {
+        if (jogadorEstaPerto && Input.GetKeyDown(KeyCode.E))
+        {
+            inventarioEstaAberto = !inventarioEstaAberto;
+
+            // Ativa/desativa a UI do inventário
+            if (painelInventarioBau != null)
+            {
+                painelInventarioBau.SetActive(inventarioEstaAberto);
+            }
+
+            // Mostra/esconde o prompt de interação
+            if (painelDeInteracaoUI != null)
+            {
+                painelDeInteracaoUI.SetActive(!inventarioEstaAberto);
+            }
+
+            // <<< MUDANÇA PRINCIPAL AQUI >>>
+            if (inventarioEstaAberto)
+            {
+                // Avisa ao gerenciador para entrar no modo de UI
+                EstadoJogador.instance.AtivarModoUI();
+            }
+            else
+            {
+                // Avisa ao gerenciador para sair do modo de UI e voltar ao jogo
+                EstadoJogador.instance.DesativarModoUI();
+            }
+            // ---------------------------------
+
+            AtualizarAnimacao();
+        }
+    }
+
+    // ... (OnTriggerEnter não precisa de mudança) ...
     private void OnTriggerEnter(Collider other)
     {
         if (other.CompareTag("Player"))
         {
-            jogadorPerto = true;
-            if (!bauAberto && promptVisual != null)
+            jogadorEstaPerto = true;
+            if (!inventarioEstaAberto && painelDeInteracaoUI != null)
             {
-                promptVisual.SetActive(true);
+                painelDeInteracaoUI.SetActive(true);
             }
-
-            if (scriptDaCamera == null)
-                scriptDaCamera = FindObjectOfType<ThirdPersonOrbitCamera>();
         }
     }
+
 
     private void OnTriggerExit(Collider other)
     {
         if (other.CompareTag("Player"))
         {
-            jogadorPerto = false;
-            if (promptVisual != null)
+            jogadorEstaPerto = false;
+
+            if (painelDeInteracaoUI != null)
             {
-                promptVisual.SetActive(false);
+                painelDeInteracaoUI.SetActive(false);
             }
 
-            if (bauAberto)
+            if (inventarioEstaAberto)
             {
-                FecharBau();
+                inventarioEstaAberto = false;
+                if (painelInventarioBau != null)
+                {
+                    painelInventarioBau.SetActive(false);
+                }
+
+                // <<< MUDANÇA AQUI TAMBÉM >>>
+                // Garante que, ao sair, o modo de UI seja desativado
+                EstadoJogador.instance.DesativarModoUI();
+                // ---------------------------
+
+                AtualizarAnimacao();
             }
         }
     }
 
-    void Update()
+    private void AtualizarAnimacao()
     {
-        if (jogadorPerto && Input.GetKeyDown(teclaInteracao))
+        if (animatorBau != null)
         {
-            if (bauAberto)
-            {
-                FecharBau();
-            }
-            else
-            {
-                AbrirBau();
-            }
+            animatorBau.SetBool(PARAMETRO_ANIMACAO_ABERTO, inventarioEstaAberto);
         }
-    }
-
-    private void AbrirBau()
-    {
-        bauAberto = true;
-        painelBau.SetActive(true);
-        if (promptVisual != null) promptVisual.SetActive(false);
-
-        if (animator != null) animator.SetTrigger("AbrirTrigger");
-
-        Cursor.lockState = CursorLockMode.None;
-        Cursor.visible = true;
-        if (scriptDaCamera != null) scriptDaCamera.podeOrbitarComMouse = false;
-    }
-
-    private void FecharBau()
-    {
-        bauAberto = false;
-        painelBau.SetActive(false);
-        if (jogadorPerto && promptVisual != null)
-        {
-            promptVisual.SetActive(true);
-        }
-
-        if (animator != null) animator.SetTrigger("FecharTrigger");
-
-        Cursor.lockState = CursorLockMode.Locked;
-        Cursor.visible = false;
-        if (scriptDaCamera != null) scriptDaCamera.podeOrbitarComMouse = true;
     }
 }

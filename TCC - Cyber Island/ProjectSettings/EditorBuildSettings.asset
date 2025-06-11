@@ -20,6 +20,9 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Diego/Tutorial/Scenes/mundo.unity
     guid: b84306e44113e7b4db9e7a34b86216c5
+  - enabled: 1
+    path: Assets/Lorenzo/Scenes/F.unity
+    guid: d6b769ed125739246ac60e1b1be3b2fe
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   m_UseUCBPForAssetBundles: 0
