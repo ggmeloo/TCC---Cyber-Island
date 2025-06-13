@@ -1,12 +1,11 @@
 using UnityEngine;
 using System.Collections.Generic;
-using System; // Necessário para o evento 'Action'
+using System;
 
 public class InventoryManager : MonoBehaviour
 {
     public static InventoryManager instance;
 
-    // A mesma classe de dados que usamos na hotbar, perfeita para o inventário
     public class SlotData
     {
         public SpecificItemType identifier;
@@ -23,18 +22,16 @@ public class InventoryManager : MonoBehaviour
         }
     }
 
-    // Evento que avisa a UI que o inventário mudou
     public event Action OnInventoryChanged;
 
     public List<SlotData> inventorySlots = new List<SlotData>();
-    public int maxSlots = 24; // Defina aqui quantos slots seu inventário tem
+    public int maxSlots = 24; // Ajuste para o tamanho do seu inventário principal
 
     void Awake()
     {
         if (instance == null) instance = this;
         else Destroy(gameObject);
 
-        // Preenche o inventário com espaços vazios (null)
         for (int i = 0; i < maxSlots; i++)
         {
             inventorySlots.Add(null);
@@ -43,29 +40,41 @@ public class InventoryManager : MonoBehaviour
 
     public bool AddItem(CollectibleItemInfo itemInfo)
     {
-        // 1. Tenta empilhar em um slot existente
         for (int i = 0; i < maxSlots; i++)
         {
             if (inventorySlots[i] != null && inventorySlots[i].identifier == itemInfo.itemIdentifier)
             {
                 inventorySlots[i].quantity++;
-                OnInventoryChanged?.Invoke(); // Dispara o evento: "Ei UI, atualize-se!"
+                OnInventoryChanged?.Invoke();
                 return true;
             }
         }
-
-        // 2. Procura um slot vazio
         for (int i = 0; i < maxSlots; i++)
         {
             if (inventorySlots[i] == null)
             {
                 inventorySlots[i] = new SlotData(itemInfo);
-                OnInventoryChanged?.Invoke(); // Dispara o evento: "Ei UI, atualize-se!"
+                OnInventoryChanged?.Invoke();
                 return true;
             }
         }
-
-        Debug.Log("Inventário está cheio!");
         return false;
+    }
+
+    // Funções para Drag-and-Drop
+    public SlotData RemoveItemAt(int index)
+    {
+        if (index < 0 || index >= inventorySlots.Count || inventorySlots[index] == null) return null;
+        SlotData itemData = inventorySlots[index];
+        inventorySlots[index] = null;
+        OnInventoryChanged?.Invoke();
+        return itemData;
+    }
+
+    public void AddItemAt(SlotData itemData, int index)
+    {
+        if (index < 0 || index >= inventorySlots.Count) return;
+        inventorySlots[index] = itemData;
+        OnInventoryChanged?.Invoke();
     }
 }
