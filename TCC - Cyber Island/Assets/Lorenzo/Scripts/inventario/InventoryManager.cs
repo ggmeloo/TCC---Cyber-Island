@@ -6,7 +6,7 @@ public class InventoryManager : MonoBehaviour
 {
     public static InventoryManager instance;
 
-    // A classe de dados que já usamos, perfeita para o inventário
+    // A mesma classe de dados que usamos na hotbar, perfeita para o inventário
     public class SlotData
     {
         public SpecificItemType identifier;
@@ -43,7 +43,7 @@ public class InventoryManager : MonoBehaviour
 
     public bool AddItem(CollectibleItemInfo itemInfo)
     {
-        // 1. Tentar empilhar em um slot existente
+        // 1. Tenta empilhar em um slot existente
         for (int i = 0; i < maxSlots; i++)
         {
             if (inventorySlots[i] != null && inventorySlots[i].identifier == itemInfo.itemIdentifier)
@@ -60,7 +60,7 @@ public class InventoryManager : MonoBehaviour
             if (inventorySlots[i] == null)
             {
                 inventorySlots[i] = new SlotData(itemInfo);
-                OnInventoryChanged?.Invoke(); // Dispara o evento
+                OnInventoryChanged?.Invoke(); // Dispara o evento: "Ei UI, atualize-se!"
                 return true;
             }
         }
