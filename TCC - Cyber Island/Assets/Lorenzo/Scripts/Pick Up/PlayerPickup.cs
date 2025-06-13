@@ -4,10 +4,10 @@ using System.Collections;
 public class PlayerPickup : MonoBehaviour
 {
     [Header("Configurações de Teclas")]
-    public KeyCode pickupKey = KeyCode.F; // Tecla para PEGAR itens do mundo
-    public KeyCode dropKey = KeyCode.Q;   // <<< NOVA TECLA para DROPAR item da hotbar
+    public KeyCode pickupKey = KeyCode.F;
     public KeyCode toggleHolsterKey = KeyCode.G;
-    public KeyCode useItemKey = KeyCode.Mouse1;
+    // As teclas de hotbar (Q, Mouse1, 1,2,3...) não são mais necessárias para a coleta do inventário principal.
+    // Deixei-as aqui caso queira reativar uma hotbar no futuro.
 
     [Header("Pontos de Encaixe (for Equippable Items)")]
     public Transform handPoint;
@@ -28,7 +28,9 @@ public class PlayerPickup : MonoBehaviour
     public PlayerAttack playerAttack;
     public Animator playerAnimator;
     public PlayerMovement playerMovementScript;
-    public SlotBarManager slotBarManager;
+
+    // <<< MUDANÇA 1: A referência agora é para o InventoryManager >>>
+    public InventoryManager inventoryManager;
 
     [Header("Configurações de Animação")]
     public string pickupAnimationTriggerName = "PickupTrigger";
@@ -56,11 +58,12 @@ public class PlayerPickup : MonoBehaviour
         if (handPoint == null) Debug.LogError("PLAYER PICKUP: HandPoint não atribuído!");
         if (standbyPoint == null) Debug.LogError("PLAYER PICKUP: StandbyPoint não atribuído!");
 
-        if (slotBarManager == null)
+        // <<< MUDANÇA 2: Procura pelo InventoryManager, não mais pelo SlotBarManager >>>
+        if (inventoryManager == null)
         {
-            slotBarManager = FindObjectOfType<SlotBarManager>();
-            if (slotBarManager == null)
-                Debug.LogWarning("PLAYER PICKUP: SlotBarManager não encontrado na cena! Itens da hotbar não funcionarão.");
+            inventoryManager = FindObjectOfType<InventoryManager>();
+            if (inventoryManager == null)
+                Debug.LogWarning("PLAYER PICKUP: InventoryManager não encontrado na cena! A coleta de itens não funcionará.");
         }
     }
 
@@ -68,12 +71,9 @@ public class PlayerPickup : MonoBehaviour
     {
         if (isPerformingAction) return;
 
-        // <<< LÓGICA DE INPUT REESTRUTURADA >>>
-
         // Ação 1: Interagir com o mundo (Pegar item do chão ou Dropar a arma equipada)
         if (Input.GetKeyDown(pickupKey)) // Tecla 'F'
         {
-            // Se tem um item ao alcance, a prioridade é pegar
             if (itemInRange != null)
             {
                 if (itemInRange.GetComponent<CollectibleItemInfo>() != null)
@@ -81,35 +81,23 @@ public class PlayerPickup : MonoBehaviour
                     StartCoroutine(PickupSequence(itemInRange));
                 }
             }
-            // Se não tem item ao alcance, mas estamos segurando uma arma, drope-a
             else if (heldItem != null)
             {
                 DropHeldItem();
             }
         }
 
-        // Ação 2: Dropar item da hotbar (tecla separada)
-        if (Input.GetKeyDown(dropKey)) // Tecla 'Q'
-        {
-            if (slotBarManager != null)
-            {
-                slotBarManager.DropSelectedItem();
-            }
-        }
-
-        // Ação 3: Equipar/Guardar arma
+        // Ação 2: Equipar/Guardar arma
         if (Input.GetKeyDown(toggleHolsterKey) && heldItem != null) // Tecla 'G'
         {
             StartCoroutine(ToggleHolsterSequence());
         }
 
-        // Ação 4: Selecionar e Usar itens da hotbar
-        HandleSlotSelectionInput(); // Teclas 1, 2, 3...
-        HandleItemUsageInput();     // Botão direito do mouse
+        // <<< MUDANÇA 3: A lógica da hotbar (Q, 1, 2, 3...) foi removida do fluxo principal >>>
+        // Se você quiser uma hotbar no futuro, pode reativar essas chamadas.
+        // HandleSlotSelectionInput();
+        // HandleItemUsageInput();
     }
-
-    // O resto do seu código (FinalizePickup, DropHeldItem, etc.) permanece EXATAMENTE O MESMO.
-    // Nenhuma outra modificação é necessária.
 
     IEnumerator PickupSequence(GameObject itemToPickUp)
     {
@@ -171,36 +159,38 @@ public class PlayerPickup : MonoBehaviour
         }
         else
         {
-            if (slotBarManager != null)
+            // <<< MUDANÇA 4: A chamada agora vai para o InventoryManager >>>
+            if (inventoryManager != null)
             {
-                bool foiAdicionado = slotBarManager.AddItem(collectedItemInfo);
+                bool foiAdicionado = inventoryManager.AddItem(collectedItemInfo);
                 if (foiAdicionado)
                 {
-                    Debug.Log($"{itemToPickUp.name} adicionado à barra de slots da UI. Destruindo o objeto do mundo.");
+                    Debug.Log($"{itemToPickUp.name} adicionado ao inventário. Destruindo o objeto do mundo.");
                     ClearItemInRange();
                     Destroy(itemToPickUp);
                 }
                 else
                 {
-                    Debug.LogWarning($"{itemToPickUp.name} não pôde ser adicionado à barra de slots (cheia). Item não foi pego.");
+                    Debug.LogWarning($"{itemToPickUp.name} não pôde ser adicionado (inventário cheio).");
                 }
             }
             else
             {
-                Debug.LogError("SlotBarManager não está atribuído no PlayerPickup! Não é possível coletar item para a UI.", this.gameObject);
+                Debug.LogError("InventoryManager não está atribuído no PlayerPickup! Não é possível coletar item para a UI.", this.gameObject);
             }
         }
     }
 
+    // O resto do seu código pode permanecer, mas as funções abaixo não serão mais chamadas a partir do Update.
+    // Elas são específicas da hotbar.
+
+    /*
     void HandleSlotSelectionInput()
     {
         if (slotBarManager == null) return;
 
         if (Input.GetKeyDown(KeyCode.Alpha1)) slotBarManager.SelectSlot(0);
-        if (Input.GetKeyDown(KeyCode.Alpha2)) slotBarManager.SelectSlot(1);
-        if (Input.GetKeyDown(KeyCode.Alpha3)) slotBarManager.SelectSlot(2);
-        if (Input.GetKeyDown(KeyCode.Alpha4)) slotBarManager.SelectSlot(3);
-        if (Input.GetKeyDown(KeyCode.Alpha5)) slotBarManager.SelectSlot(4);
+        // ... etc
     }
 
     void HandleItemUsageInput()
@@ -213,6 +203,7 @@ public class PlayerPickup : MonoBehaviour
             }
         }
     }
+    */
 
     void DropHeldItem()
     {
